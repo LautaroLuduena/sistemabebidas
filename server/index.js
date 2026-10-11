@@ -20,7 +20,8 @@ function createApp() {
     if (!req.body) req.body = {};
     next();
   });
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // no-cache: el navegador revalida en cada carga, así siempre toma la última versión después de actualizar
+  app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
   app.use('/uploads', auth.requireAuth, express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
   const api = express.Router();

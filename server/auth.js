@@ -100,7 +100,9 @@ const usersCount = () => db.prepare('SELECT COUNT(*) n FROM users').get().n;
 const router = express.Router();
 
 router.get('/auth/status', (req, res) => {
-  res.json({ setup_needed: usersCount() === 0, user: currentUser(req) });
+  // En Railway, si no hay volumen montado los datos se pierden en cada actualización
+  const storage_warning = Boolean(process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH);
+  res.json({ setup_needed: usersCount() === 0, user: currentUser(req), storage_warning });
 });
 
 /** Primer uso: crea el usuario administrador. Solo funciona si todavía no hay usuarios. */

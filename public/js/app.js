@@ -1660,6 +1660,11 @@ async function boot() {
   if (status.setup_needed) return showAuth('setup');
   if (!status.user) return showAuth('login');
   session.user = status.user;
+  if (status.storage_warning && !$('#storageWarning'))
+    $('.main').insertAdjacentHTML(
+      'afterbegin',
+      '<div id="storageWarning" style="background:var(--danger);color:#fff;padding:10px 20px"><b>⚠️ Atención:</b> el servidor no tiene un volumen persistente. Los datos se van a perder en la próxima actualización. En Railway: Settings → Volumes → agregá un volumen con ruta <code>/data</code>.</div>'
+    );
   $('#userName').textContent = status.user.username;
   loadBrand();
   refreshTopBalances();

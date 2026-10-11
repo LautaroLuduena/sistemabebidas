@@ -53,6 +53,9 @@ function createApp() {
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
+  if (process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    console.warn('ATENCIÓN: no hay un volumen de Railway montado. Los datos se perderán en cada actualización. Agregá un volumen en /data.');
+  }
   createApp().listen(PORT, () => {
     console.log(`\n  Sistema Bebidas funcionando en http://localhost:${PORT}\n`);
   });

@@ -1,8 +1,8 @@
 FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --omit=dev --ignore-scripts
 COPY server ./server
 COPY public ./public
 # Los datos (base de datos y fotos) van en un volumen persistente montado en /data.

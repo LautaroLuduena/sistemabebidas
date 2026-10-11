@@ -1,0 +1,105 @@
+const { db, round2 } = require('./db');
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const BOXES = ['efectivo', 'transferencia'];
+
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function defaultPriceListId() {
+  const row = db.prepare('SELECT id FROM price_lists ORDER BY is_default DESC, id ASC LIMIT 1').get();
+  return row ? row.id : null;
+}
+
+function getPriceList(id) {
+  const list = db.prepare('SELECT * FROM price_lists WHERE id = ?').get(id);
+  if (!list) throw new HttpError(404, 'Lista de precios no encontrada');
+  return list;
+}
+
+/** Precio de un producto en una lista: precio fijo cargado, o costo + recargo de la lista. */
+function priceFor(product, list) {
+  const fixed = db
+    .prepare('SELECT price FROM product_prices WHERE product_id = ? AND price_list_id = ?')
+    .get(product.id, list.id);
+  if (fixed) return { price: fixed.price, fixed: true };
+  return { price: round2(product.cost * (1 + list.markup / 100)), fixed: false };
+}
+
+/** Todos los precios de un producto (uno por lista). */
+function pricesForProduct(product) {
+  const lists = db.prepare('SELECT * FROM price_lists ORDER BY id').all();
+  return lists.map((l) => ({ price_list_id: l.id, name: l.name, ...priceFor(product, l) }));
+}
+
+function addCash(box, amount, concept, refType, refId, date) {
+  if (!BOXES.includes(box)) throw new HttpError(400, 'Caja inválida');
+  amount = round2(amount);
+  if (amount === 0) return;
+  db.prepare(
+    `INSERT INTO cash_movements (box, amount, concept, ref_type, ref_id, date)
+     VALUES (?,?,?,?,?, COALESCE(?, datetime('now','localtime')))`
+  ).run(box, amount, concept, refType || 'manual', refId || null, date || null);
+}
+
+function addAccount(partyType, partyId, amount, concept, refType, refId, date) {
+  amount = round2(amount);
+  if (amount === 0) return;
+  db.prepare(
+    `INSERT INTO account_movements (party_type, party_id, amount, concept, ref_type, ref_id, date)
+     VALUES (?,?,?,?,?,?, COALESCE(?, datetime('now','localtime')))`
+  ).run(partyType, partyId, amount, concept, refType || null, refId || null, date || null);
+}
+
+function addStock(productId, quantity, type, refId, notes) {
+  if (!quantity) return;
+  db.prepare('UPDATE products SET stock = stock + ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?').run(
+    quantity,
+    productId
+  );
+  db.prepare('INSERT INTO stock_movements (product_id, quantity, type, ref_id, notes) VALUES (?,?,?,?,?)').run(
+    productId,
+    quantity,
+    type,
+    refId || null,
+    notes || null
+  );
+}
+
+function boxBalances() {
+  const rows = db.prepare('SELECT box, COALESCE(SUM(amount),0) balance FROM cash_movements GROUP BY box').all();
+  const out = { efectivo: 0, transferencia: 0 };
+  rows.forEach((r) => (out[r.box] = round2(r.balance)));
+  out.total = round2(out.efectivo + out.transferencia);
+  return out;
+}
+
+function accountBalance(partyType, partyId) {
+  const r = db
+    .prepare('SELECT COALESCE(SUM(amount),0) b FROM account_movements WHERE party_type = ? AND party_id = ?')
+    .get(partyType, partyId);
+  return round2(r.b);
+}
+
+module.exports = {
+  HttpError,
+  BOXES,
+  getSetting,
+  defaultPriceListId,
+  getPriceList,
+  priceFor,
+  pricesForProduct,
+  addCash,
+  addAccount,
+  addStock,
+  boxBalances,
+  accountBalance,
+};

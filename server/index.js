@@ -23,6 +23,7 @@ function createApp() {
   app.use('/uploads', auth.requireAuth, express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
   const api = express.Router();
+  api.get('/health', (req, res) => res.json({ ok: true }));
   api.use(auth.router); // login / setup (sin sesión)
   api.use(auth.requireAuth);
   api.use('/users', auth.users);
@@ -56,7 +57,7 @@ if (require.main === module) {
   if (process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH) {
     console.warn('ATENCIÓN: no hay un volumen de Railway montado. Los datos se perderán en cada actualización. Agregá un volumen en /data.');
   }
-  createApp().listen(PORT, () => {
+  createApp().listen(PORT, '0.0.0.0', () => {
     console.log(`\n  Sistema Bebidas funcionando en http://localhost:${PORT}\n`);
   });
 }

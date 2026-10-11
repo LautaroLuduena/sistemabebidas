@@ -21,7 +21,7 @@ Funciona en tu computadora (Windows, Mac o Linux) y se usa desde el navegador. T
 
 ## Instalación
 
-1. Instalá **Node.js 20 o superior** desde <https://nodejs.org> (versión LTS).
+1. Instalá **Node.js 22 o superior** desde <https://nodejs.org> (versión LTS).
 2. Descargá este proyecto y, dentro de la carpeta, ejecutá:
 
 ```bash

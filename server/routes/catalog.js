@@ -45,14 +45,18 @@ router.get('/categories', (req, res) => {
 
 router.post('/categories', (req, res) => {
   const name = emptyToNull(req.body.name);
-  if (!name) throw new HttpError(400, 'El nombre es obligatorio');
+  if (!name) throw new HttpError(400, 'Escribí el nombre de la categoría');
+  const existing = db.prepare('SELECT id, name FROM categories WHERE name = ?').get(name);
+  if (existing) throw new HttpError(409, `La categoría "${existing.name}" ya existe`);
   const r = db.prepare('INSERT INTO categories (name) VALUES (?)').run(name);
   res.status(201).json({ id: r.lastInsertRowid, name });
 });
 
 router.put('/categories/:id', (req, res) => {
   const name = emptyToNull(req.body.name);
-  if (!name) throw new HttpError(400, 'El nombre es obligatorio');
+  if (!name) throw new HttpError(400, 'Escribí el nombre de la categoría');
+  const existing = db.prepare('SELECT id FROM categories WHERE name = ? AND id <> ?').get(name, req.params.id);
+  if (existing) throw new HttpError(409, 'Ya existe otra categoría con ese nombre');
   db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(name, req.params.id);
   res.json({ ok: true });
 });

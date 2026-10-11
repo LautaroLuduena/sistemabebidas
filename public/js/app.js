@@ -37,6 +37,10 @@ async function api(path, { method = 'GET', body, form } = {}) {
   }
   const res = await fetch('/api' + path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    showAuth('login');
+    throw new Error('Tu sesión expiró. Volvé a iniciar sesión.');
+  }
   if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
   return data;
 }
@@ -1107,7 +1111,7 @@ async function productForm(id, onSaved) {
         ${field('Nombre *', `<input name="name" value="${esc(prod.name)}" placeholder="Ej: Coca-Cola Original 2.25L">`, 'full')}
         ${field('Código de barras', `<div style="display:flex;gap:6px"><input name="barcode" value="${esc(prod.barcode)}" style="flex:1" placeholder="Escaneá el código" data-noenter="1"><button type="button" class="btn sm" id="genEan" title="Generar código interno">⚙️</button></div>`)}
         ${field('Código interno', `<input name="code" value="${esc(prod.code)}">`)}
-        ${field('Categoría', `<select name="category_id"><option value="">— Sin categoría —</option>${cats.map((c) => opt(c.id, c.name, prod.category_id)).join('')}</select>`)}
+        ${field('Categoría', `<div style="display:flex;gap:6px"><select name="category_id" style="flex:1"><option value="">— Sin categoría —</option>${cats.map((c) => opt(c.id, c.name, prod.category_id)).join('')}</select><button type="button" class="btn sm" id="newCat" title="Crear categoría">➕</button></div>`)}
         ${field('Marca', `<input name="brand" value="${esc(prod.brand)}">`)}
         ${field('Presentación', `<input name="presentation" value="${esc(prod.presentation)}" placeholder="Ej: Lata 473ml">`)}
         ${field('Unidades por bulto / pack', `<input name="units_per_pack" value="${prod.units_per_pack || 1}">`)}
@@ -1151,6 +1155,26 @@ async function productForm(id, onSaved) {
         if (file) $('#imgPreview', el).innerHTML = `<img src="${URL.createObjectURL(file)}">`;
       };
       $('#genEan', el).onclick = () => ($('[name=barcode]', el).value = generateEAN());
+      $('#newCat', el).onclick = () =>
+        modal({
+          title: 'Nueva categoría',
+          body: field('Nombre', '<input name="name" placeholder="Ej: Cervezas">'),
+          actions: [
+            { label: 'Cancelar' },
+            {
+              label: 'Crear',
+              cls: 'primary',
+              onClick: async (m) => {
+                const c = await api('/categories', { method: 'POST', body: formData(m) });
+                const sel = $('[name=category_id]', el);
+                sel.insertAdjacentHTML('beforeend', opt(c.id, c.name));
+                sel.value = c.id;
+                cache._cats = null;
+                toast(`Categoría "${c.name}" creada`, 'ok');
+              },
+            },
+          ],
+        });
       const updatePlaceholders = () => {
         const cost = num($('#costInput', el).value);
         $$('[data-list]', el).forEach((i) => (i.placeholder = `Auto: ${money(cost * (1 + Number(i.dataset.markup) / 100))}`));
@@ -1307,7 +1331,8 @@ views.categorias = {
       </tbody></table></div>`;
     const reload = () => views.categorias.render(view);
     const add = safe(async () => {
-      await api('/categories', { method: 'POST', body: { name: $('#catName').value } });
+      const c = await api('/categories', { method: 'POST', body: { name: $('#catName').value } });
+      toast(`Categoría "${c.name}" creada`, 'ok');
       reload();
     });
     $('#catAdd').onclick = add;
@@ -1517,8 +1542,41 @@ views.config = {
         ${field('Pie de la lista de precios', `<input name="price_list_footer" value="${esc(s.price_list_footer)}" placeholder="Ej: Precios sujetos a cambio sin previo aviso">`, 'full')}
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="cfgSave">Guardar</button></div></div>
+      <div class="card" style="max-width:720px"><h2>👤 Usuarios</h2>
+        <p class="muted">Personas que pueden entrar al sistema.</p>
+        <table class="table"><tbody id="usersBody"></tbody></table>
+        <div class="toolbar" style="margin-top:12px"><button class="btn" id="userNew">➕ Nuevo usuario</button></div></div>
       <div class="card" style="max-width:720px"><h2>Respaldo</h2>
         <p class="muted">Todos los datos se guardan en la carpeta <code>data/</code> del sistema (base de datos <code>sistema.db</code> y fotos en <code>uploads/</code>). Copiá esa carpeta periódicamente a un pendrive o a la nube para tener respaldo.</p></div>`;
+    const loadUsers = safe(async () => {
+      const users = await api('/users');
+      $('#usersBody').innerHTML = users
+        .map((u) => `<tr><td><b>${esc(u.username)}</b> ${session.user && u.id === session.user.id ? '<span class="badge info">vos</span>' : ''}</td>
+          <td class="muted">Creado ${esc(u.created_at)}</td>
+          <td class="actions"><button class="btn sm" data-pass="${u.id}">🔑 Cambiar contraseña</button>
+          ${session.user && u.id === session.user.id ? '' : `<button class="btn sm danger" data-del="${u.id}">✕</button>`}</td></tr>`)
+        .join('');
+    });
+    $('#userNew').onclick = () =>
+      modal({
+        title: 'Nuevo usuario',
+        body: `<div class="form-grid">${field('Usuario', '<input name="username" autocomplete="off">')}${field('Contraseña (mín. 6)', '<input name="password" type="password" autocomplete="new-password">')}</div>`,
+        actions: [{ label: 'Cancelar' }, { label: 'Crear', cls: 'primary', onClick: async (el) => { await api('/users', { method: 'POST', body: formData(el) }); toast('Usuario creado', 'ok'); loadUsers(); } }],
+      });
+    $('#usersBody').onclick = safe(async (e) => {
+      const d = e.target.dataset;
+      if (d.pass)
+        modal({
+          title: 'Cambiar contraseña',
+          body: field('Nueva contraseña (mín. 6)', '<input name="password" type="password" autocomplete="new-password">'),
+          actions: [{ label: 'Cancelar' }, { label: 'Guardar', cls: 'primary', onClick: async (el) => { await api(`/users/${d.pass}/password`, { method: 'PUT', body: formData(el) }); toast('Contraseña actualizada', 'ok'); } }],
+        });
+      if (d.del && (await confirmDialog('¿Eliminar este usuario?', 'Eliminar'))) {
+        await api('/users/' + d.del, { method: 'DELETE' });
+        loadUsers();
+      }
+    });
+    loadUsers();
     $('#cfgSave').onclick = safe(async () => {
       await api('/settings', { method: 'PUT', body: formData($('#cfgForm')) });
       toast('Configuración guardada', 'ok');
@@ -1557,8 +1615,67 @@ async function route() {
   }
 }
 
+// ======================= Inicio de sesión =======================
+const session = { user: null, started: false };
+
+function showAuth(mode) {
+  if ($('#authScreen')) return;
+  const setup = mode === 'setup';
+  const el = document.createElement('div');
+  el.id = 'authScreen';
+  el.className = 'auth-screen';
+  el.innerHTML = `<form class="auth-card">
+    <div style="font-size:42px;text-align:center">🥤</div>
+    <h2 style="text-align:center;margin:4px 0 4px">${setup ? 'Bienvenido' : 'Iniciar sesión'}</h2>
+    <p class="muted" style="text-align:center;margin-top:0">${setup ? 'Creá el usuario administrador para empezar a usar el sistema.' : 'Ingresá con tu usuario y contraseña.'}</p>
+    ${field('Usuario', '<input name="username" autocomplete="username" required>')}
+    ${field(setup ? 'Contraseña (mínimo 6 caracteres)' : 'Contraseña', `<input name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" required>`)}
+    ${setup ? field('Repetir contraseña', '<input name="password2" type="password" autocomplete="new-password" required>') : ''}
+    <div class="neg" id="authError" style="min-height:18px"></div>
+    <button class="btn primary lg" style="width:100%;justify-content:center">${setup ? 'Crear usuario y entrar' : 'Entrar'}</button></form>`;
+  document.body.appendChild(el);
+  $('input', el).focus();
+  $('form', el).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = formData(el);
+    try {
+      if (setup && f.password !== f.password2) throw new Error('Las contraseñas no coinciden');
+      await api(setup ? '/auth/setup' : '/auth/login', { method: 'POST', body: { username: f.username, password: f.password } });
+      el.remove();
+      boot();
+    } catch (err) {
+      $('#authError', el).textContent = err.message;
+    }
+  };
+}
+
+async function boot() {
+  let status;
+  try {
+    status = await api('/auth/status');
+  } catch (e) {
+    $('#view').innerHTML = `<div class="card neg">No se pudo conectar con el servidor: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (status.setup_needed) return showAuth('setup');
+  if (!status.user) return showAuth('login');
+  session.user = status.user;
+  $('#userName').textContent = status.user.username;
+  loadBrand();
+  refreshTopBalances();
+  if (!session.started) {
+    session.started = true;
+    window.addEventListener('hashchange', route);
+  }
+  route();
+}
+
 $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
-window.addEventListener('hashchange', route);
-loadBrand();
-refreshTopBalances();
-route();
+$('#logoutBtn').onclick = async (e) => {
+  e.preventDefault();
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  session.user = null;
+  $('#view').innerHTML = '';
+  showAuth('login');
+};
+boot();

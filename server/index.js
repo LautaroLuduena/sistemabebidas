@@ -9,18 +9,23 @@ const { sales, purchases } = require('./routes/operations');
 const cash = require('./routes/cash');
 const reports = require('./routes/reports');
 const files = require('./routes/files');
+const auth = require('./auth');
 
 function createApp() {
   const app = express();
+  app.set('trust proxy', 1); // detrás de un proxy HTTPS (Railway, Render, etc.)
   app.use(express.json({ limit: '5mb' }));
   app.use((req, res, next) => {
     if (!req.body) req.body = {};
     next();
   });
-  app.use('/uploads', express.static(UPLOADS_DIR, { maxAge: '7d' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.use('/uploads', auth.requireAuth, express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
   const api = express.Router();
+  api.use(auth.router); // login / setup (sin sesión)
+  api.use(auth.requireAuth);
+  api.use('/users', auth.users);
   api.use(files); // primero, para que /products/export.xlsx no choque con /products/:id
   api.use(catalog);
   api.use('/customers', customers);

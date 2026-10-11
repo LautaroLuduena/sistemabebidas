@@ -11,11 +11,23 @@ const { _test: parsers } = require('../server/routes/files');
 
 let server;
 let base;
+let cookie = '';
 
 before(async () => {
   server = createApp().listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api`;
+});
+
+test('login: sin sesión no hay acceso; el primer usuario se crea con setup', async () => {
+  await assert.rejects(call('GET', '/products'), (e) => e.status === 401);
+  assert.equal((await call('GET', '/auth/status')).setup_needed, true);
+  await call('POST', '/auth/setup', { username: 'admin', password: 'secreta123' });
+  await assert.rejects(call('POST', '/auth/setup', { username: 'otro', password: 'secreta123' }), (e) => e.status === 403);
+  cookie = '';
+  await assert.rejects(call('POST', '/auth/login', { username: 'admin', password: 'mala' }), (e) => e.status === 401);
+  await call('POST', '/auth/login', { username: 'admin', password: 'secreta123' });
+  assert.equal((await call('GET', '/auth/status')).user.username, 'admin');
 });
 after(() => {
   server.close();
@@ -23,13 +35,15 @@ after(() => {
 });
 
 async function call(method, url, body) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: cookie ? { Cookie: cookie } : {} };
   if (body instanceof FormData) opts.body = body;
   else if (body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(base + url, opts);
+  const setCookie = res.headers.get('set-cookie');
+  if (setCookie) cookie = setCookie.split(';')[0];
   const data = await res.json();
   if (!res.ok) throw Object.assign(new Error(data.error), { status: res.status });
   return data;
@@ -117,6 +131,12 @@ test('flujo completo: importación, venta, cobro, compra, caja y anulación', as
 
   const dash = await call('GET', '/dashboard');
   assert.equal(dash.payable.total, 18000);
+});
+
+test('categorías: alta y nombre duplicado', async () => {
+  const c = await call('POST', '/categories', { name: 'Energizantes' });
+  assert.equal(c.name, 'Energizantes');
+  await assert.rejects(call('POST', '/categories', { name: 'energizantes' }), /ya existe/);
 });
 
 test('actualización masiva de precios', async () => {

@@ -35,6 +35,35 @@ En Windows también podés hacer doble clic en `iniciar.bat`.
 
 Para usarlo desde otro dispositivo de la misma red, entrá a `http://IP-DE-LA-PC:3000` (ej: `http://192.168.0.10:3000`).
 
+La primera vez que entrás te pide crear el **usuario administrador**. Después podés agregar más usuarios en **Configuración → Usuarios**.
+
+> **¿Se pierden los datos si cierro la terminal?** No. Todo queda guardado en la carpeta `data/`. Al cerrar la terminal el sistema se detiene, pero al volver a iniciarlo está todo como lo dejaste. Para no tener que iniciarlo cada vez, publicalo online (ver abajo).
+
+## Publicarlo online (sin tener que iniciarlo cada vez)
+
+El sistema queda funcionando 24 h en un servidor y entrás desde cualquier PC o celular con usuario y contraseña. Lo importante es que el servidor tenga un **disco persistente** (volumen), porque ahí se guardan la base de datos y las fotos: en servicios sin disco persistente los datos se borran en cada reinicio.
+
+### Opción recomendada: Railway (≈ USD 5/mes)
+
+1. Creá una cuenta en <https://railway.com> e iniciá sesión con GitHub.
+2. **New Project → Deploy from GitHub repo** → elegí `sistemabebidas` (y la rama que quieras publicar).
+3. Railway detecta el `Dockerfile` y lo construye solo.
+4. En el servicio: **Settings → Volumes → Add volume**, con *mount path* `/data`. (Sin este paso, los datos se pierden en cada actualización).
+5. **Settings → Networking → Generate Domain** para obtener la dirección pública (ej: `sistemabebidas.up.railway.app`).
+6. Entrá a esa dirección y creá tu usuario administrador **enseguida** (el primero que entra lo crea).
+
+Cada vez que se suban cambios a la rama, Railway actualiza el sistema solo y los datos se mantienen en el volumen.
+
+### Otras opciones
+
+- **Render** (plan pago “Starter” + *Persistent Disk* montado en `/data`).
+- **Fly.io** (con un *volume* montado en `/data`).
+- **Un VPS** (DigitalOcean, Hetzner, Contabo, etc.): `docker build -t bebidas . && docker run -d --restart=always -p 80:3000 -v bebidas-data:/data bebidas`.
+
+Cualquier opción que use el `Dockerfile` funciona, siempre que `/data` sea un disco persistente.
+
+**Respaldo online:** descargá periódicamente el inventario en Excel desde *Importar / Exportar*, y si el proveedor lo permite, activá los backups del volumen.
+
 ## Carga masiva de productos
 
 Desde **Importar / Exportar** descargá la plantilla. Columnas reconocidas (solo `nombre` es obligatoria):
@@ -76,6 +105,8 @@ Todo se guarda en la carpeta `data/`:
 
 Variables opcionales: `PORT` (puerto, por defecto 3000) y `DATA_DIR` (carpeta de datos).
 
+Si olvidaste la contraseña y no hay otro usuario: con el sistema detenido, borrá las tablas de usuarios con `node -e "const D=require('better-sqlite3');const d=new D('data/sistema.db');d.exec('DELETE FROM sessions; DELETE FROM users')"` y al volver a entrar te pedirá crear el administrador de nuevo (no se pierde ningún otro dato).
+
 ## Cómo se calculan los saldos
 
 - **Caja:** cada venta/cobro suma en la caja elegida; cada compra/pago/gasto resta. El saldo es la suma de los movimientos.
@@ -95,6 +126,7 @@ Estructura:
 server/           API (Node.js + Express + SQLite)
   db.js           esquema de la base de datos
   services.js     lógica de precios, caja, cuentas corrientes y stock
+  auth.js         usuarios, login y sesiones
   routes/         catálogo, clientes/proveedores, ventas/compras, caja, reportes, importación/exportación
 public/           interfaz web (HTML + CSS + JavaScript, sin compilación)
 test/             tests

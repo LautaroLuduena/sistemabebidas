@@ -17,6 +17,29 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `);
 
+/**
+ * Recuperación de acceso: si se define la variable RESET_ADMIN_PASSWORD (y opcionalmente RESET_ADMIN_USER),
+ * al iniciar se crea ese usuario o se le cambia la contraseña. Después hay que borrar la variable.
+ */
+function applyAdminReset() {
+  const password = process.env.RESET_ADMIN_PASSWORD;
+  if (!password) return;
+  const username = (process.env.RESET_ADMIN_USER || 'admin').trim();
+  if (password.length < 6 || username.length < 3) {
+    console.warn('RESET_ADMIN_PASSWORD debe tener al menos 6 caracteres y RESET_ADMIN_USER al menos 3. No se aplicó.');
+    return;
+  }
+  const hash = hashPassword(password);
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (existing) {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, existing.id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id);
+  } else {
+    db.prepare('INSERT INTO users (username, password_hash) VALUES (?,?)').run(username, hash);
+  }
+  console.warn(`Acceso restablecido para el usuario "${username}". Borrá la variable RESET_ADMIN_PASSWORD.`);
+}
+
 const COOKIE = 'sb_session';
 const SESSION_DAYS = 30;
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -94,6 +117,8 @@ function failAttempt(ip, a) {
   }
   attempts.set(ip, a);
 }
+
+applyAdminReset();
 
 const usersCount = () => db.prepare('SELECT COUNT(*) n FROM users').get().n;
 

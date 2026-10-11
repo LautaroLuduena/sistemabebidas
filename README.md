@@ -105,7 +105,9 @@ Todo se guarda en la carpeta `data/`:
 
 Variables opcionales: `PORT` (puerto, por defecto 3000) y `DATA_DIR` (carpeta de datos).
 
-Si olvidaste la contraseña y no hay otro usuario: con el sistema detenido, borrá las tablas de usuarios con `node -e "const D=require('better-sqlite3');const d=new D('data/sistema.db');d.exec('DELETE FROM sessions; DELETE FROM users')"` y al volver a entrar te pedirá crear el administrador de nuevo (no se pierde ningún otro dato).
+**Si olvidaste la contraseña:** definí las variables de entorno `RESET_ADMIN_USER` (tu usuario) y `RESET_ADMIN_PASSWORD` (la nueva contraseña) y reiniciá el sistema; en Railway se cargan en *Variables*. Al iniciar, ese usuario queda con la nueva contraseña (o se crea si no existe). Después **borrá la variable `RESET_ADMIN_PASSWORD`**.
+
+Otra forma, en una instalación local y con el sistema detenido: con el sistema detenido, borrá las tablas de usuarios con `node -e "const D=require('better-sqlite3');const d=new D('data/sistema.db');d.exec('DELETE FROM sessions; DELETE FROM users')"` y al volver a entrar te pedirá crear el administrador de nuevo (no se pierde ningún otro dato).
 
 ## Cómo se calculan los saldos
 

@@ -1336,7 +1336,10 @@ views.categorias = {
       reload();
     });
     $('#catAdd').onclick = add;
-    $('#catName').onkeydown = (e) => e.key === 'Enter' && add();
+    // Ojo: un handler on* que devuelve false cancela la tecla; por eso no se usa "e.key === 'Enter' && add()"
+    $('#catName').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') add();
+    });
     view.querySelector('tbody').onclick = safe(async (e) => {
       const d = e.target.dataset;
       const c = cats.find((x) => String(x.id) === String(d.edit || d.del));

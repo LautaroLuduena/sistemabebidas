@@ -147,3 +147,20 @@ test('actualización masiva de precios', async () => {
   const after = await call('GET', `/products/barcode/222?price_list_id=${minorista.id}`);
   assert.equal(after.price, Math.round(soda.price * 1.1 * 100) / 100);
 });
+
+test('respaldo y restauración', async () => {
+  const before = await call('GET', '/products');
+  const res = await fetch(base + '/backup.zip', { headers: { Cookie: cookie } });
+  assert.equal(res.status, 200);
+  const zip = await res.arrayBuffer();
+  // Cambio posterior al respaldo que la restauración debe deshacer
+  await call('POST', '/categories', { name: 'Temporal' });
+  const fd = new FormData();
+  fd.append('file', new Blob([zip]), 'respaldo.zip');
+  const r = await call('POST', '/restore', fd);
+  assert.equal(r.products, before.length);
+  const cats = await call('GET', '/categories');
+  assert.ok(!cats.some((c) => c.name === 'Temporal'));
+  // El usuario actual sigue pudiendo usar el sistema
+  assert.equal((await call('GET', '/auth/status')).user.username, 'admin');
+});

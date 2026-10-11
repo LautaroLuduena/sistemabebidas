@@ -101,6 +101,8 @@ Todo se guarda en la carpeta `data/`:
 - `data/sistema.db` → base de datos (SQLite)
 - `data/uploads/` → fotos de los productos
 
+También podés descargar un respaldo completo desde **Configuración → Respaldo**, y restaurarlo ahí mismo en otra instalación (por ejemplo, para pasar los datos de tu PC al servidor online: comprimí la carpeta `data` en un .zip y subilo en *Restaurar respaldo*). Los usuarios de la instalación donde restaurás se mantienen.
+
 **Hacé copias de esa carpeta periódicamente** (pendrive, Google Drive, etc.). Para restaurar, reemplazá la carpeta `data/` con la copia.
 
 Variables opcionales: `PORT` (puerto, por defecto 3000) y `DATA_DIR` (carpeta de datos).

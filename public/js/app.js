@@ -1546,8 +1546,15 @@ views.config = {
         <p class="muted">Personas que pueden entrar al sistema.</p>
         <table class="table"><tbody id="usersBody"></tbody></table>
         <div class="toolbar" style="margin-top:12px"><button class="btn" id="userNew">➕ Nuevo usuario</button></div></div>
-      <div class="card" style="max-width:720px"><h2>Respaldo</h2>
-        <p class="muted">Todos los datos se guardan en la carpeta <code>data/</code> del sistema (base de datos <code>sistema.db</code> y fotos en <code>uploads/</code>). Copiá esa carpeta periódicamente a un pendrive o a la nube para tener respaldo.</p></div>`;
+      <div class="card" style="max-width:720px"><h2>💾 Respaldo</h2>
+        <p class="muted">Descargá una copia completa (base de datos + fotos) y guardala en un pendrive o en la nube. Hacelo seguido.</p>
+        <div class="toolbar"><a class="btn primary" href="/api/backup.zip">⬇️ Descargar respaldo completo</a></div>
+        <h3 style="font-size:14px;margin:18px 0 6px">Restaurar / traer datos de otra instalación</h3>
+        <p class="muted" style="margin-top:0">Subí un respaldo descargado de acá, la carpeta <code>data</code> del sistema comprimida en .zip, o el archivo <code>sistema.db</code>.
+          <b>Reemplaza todos los datos actuales</b> (productos, clientes, ventas, caja…). Los usuarios actuales se mantienen.</p>
+        <input type="file" id="restoreFile" accept=".zip,.db">
+        <div class="toolbar" style="margin-top:10px"><button class="btn danger" id="restoreGo">♻️ Restaurar respaldo</button></div>
+        <div id="restoreResult"></div></div>`;
     const loadUsers = safe(async () => {
       const users = await api('/users');
       $('#usersBody').innerHTML = users
@@ -1577,6 +1584,25 @@ views.config = {
       }
     });
     loadUsers();
+    $('#restoreGo').onclick = safe(async () => {
+      const file = $('#restoreFile').files[0];
+      if (!file) throw new Error('Elegí el archivo de respaldo');
+      if (!(await confirmDialog('Se van a REEMPLAZAR todos los datos actuales por los del respaldo. Te conviene descargar antes un respaldo de lo que hay ahora. ¿Continuar?', 'Restaurar'))) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      $('#restoreGo').disabled = true;
+      $('#restoreResult').innerHTML = '<p class="muted">Restaurando… puede tardar si hay muchas fotos.</p>';
+      try {
+        const r = await api('/restore', { method: 'POST', form: fd });
+        cache.invalidate();
+        $('#restoreResult').innerHTML = `<div class="card" style="margin-top:12px;background:var(--ok-soft)">✅ Datos restaurados: ${r.products} productos, ${r.customers} clientes, ${r.suppliers} proveedores, ${r.sales} ventas, ${r.purchases} compras y ${r.photos} fotos.</div>`;
+        toast('Respaldo restaurado', 'ok');
+        loadBrand();
+        refreshTopBalances();
+      } finally {
+        $('#restoreGo').disabled = false;
+      }
+    });
     $('#cfgSave').onclick = safe(async () => {
       await api('/settings', { method: 'PUT', body: formData($('#cfgForm')) });
       toast('Configuración guardada', 'ok');

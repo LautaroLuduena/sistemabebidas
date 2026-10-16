@@ -352,3 +352,60 @@ test('borrar lista de precios, producto o cliente que ya se usaron no da error d
   assert.equal((await call('DELETE', `/customers/${cli.id}`)).deactivated, true);
   assert.equal((await call('DELETE', `/products/${prod.id}`)).deactivated, true);
 });
+
+test('pedidos web: no se puede pedir más que el stock, la mercadería queda reservada y se libera al cancelar', async () => {
+  await call('PUT', '/settings', { shop_enabled: '1', shop_private: '0', shop_whatsapp: '5493510000000', shop_min_order: '' });
+  const pub = (path, body) =>
+    fetch(base + '/shop' + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}).then(async (r) => ({ status: r.status, data: await r.json() }));
+  const prod = await call('POST', '/products', { name: 'Reserva Test', cost: 100, stock: 10 });
+  const find = async () => (await pub('/products')).data.find((p) => p.id === prod.id);
+  assert.equal((await find()).max, 10);
+
+  // Más de lo que hay: rechazado
+  const tooMuch = await pub('/orders', { name: 'Ana', phone: '1', items: [{ product_id: prod.id, quantity: 11 }] });
+  assert.equal(tooMuch.status, 409);
+  assert.match(tooMuch.data.error, /solo hay 10 disponibles/);
+
+  // Pedido de 7: quedan 3 disponibles para el resto
+  const o1 = await pub('/orders', { name: 'Ana', phone: '1', items: [{ product_id: prod.id, quantity: 7 }] });
+  assert.equal(o1.status, 201);
+  assert.equal((await find()).max, 3);
+  const catalog = (await call('GET', '/products?q=Reserva Test'))[0];
+  assert.equal(catalog.stock, 10); // el stock real no cambia
+  assert.equal(catalog.reserved, 7);
+  assert.equal(catalog.available, 3);
+  assert.equal((await pub('/orders', { name: 'Beto', phone: '2', items: [{ product_id: prod.id, quantity: 4 }] })).status, 409);
+  const o2 = await pub('/orders', { name: 'Beto', phone: '2', items: [{ product_id: prod.id, quantity: 3 }] });
+  assert.equal(o2.status, 201);
+  assert.equal((await find()).available, false);
+
+  // Estados
+  await call('POST', `/quotes/${o1.data.id}/status`, { status: 'confirmado' });
+  await call('POST', `/quotes/${o1.data.id}/status`, { status: 'listo' });
+  assert.equal((await call('GET', `/quotes/${o1.data.id}`)).status, 'listo');
+  await assert.rejects(call('POST', `/quotes/${o1.data.id}/status`, { status: 'vendido' }), /inválido/);
+  assert.equal((await call('GET', '/quotes?status=activos&source=web')).filter((q) => [o1.data.id, o2.data.id].includes(q.id)).length, 2);
+
+  // Modificar: no puede superar lo disponible (su propia reserva cuenta a favor)
+  const q1 = await call('GET', `/quotes/${o1.data.id}`);
+  assert.equal(q1.items[0].available, 7);
+  await assert.rejects(call('PUT', `/quotes/${o1.data.id}`, { items: [{ product_id: prod.id, quantity: 8, unit_price: 100 }] }), /solo hay 7/);
+  await call('PUT', `/quotes/${o1.data.id}`, { customer_name: 'Ana', items: [{ product_id: prod.id, quantity: 5, unit_price: 100 }] });
+  assert.equal((await call('GET', `/quotes/${o1.data.id}`)).status, 'modificado');
+  assert.equal((await find()).max, 2);
+
+  // Cancelar libera la reserva
+  await call('POST', `/quotes/${o2.data.id}/cancel`);
+  assert.equal((await find()).max, 5);
+
+  // Cobrar y cerrar: descuenta stock y libera la reserva
+  const sale = await call('POST', '/sales', { quote_id: o1.data.id, items: [{ product_id: prod.id, quantity: 5, unit_price: 100 }], paid_cash: 500 });
+  const closed = await call('GET', `/quotes/${o1.data.id}`);
+  assert.equal(closed.status, 'vendido');
+  assert.equal(closed.sale_id, sale.id);
+  const after = (await call('GET', '/products?q=Reserva Test'))[0];
+  assert.equal(after.stock, 5);
+  assert.equal(after.reserved, 0);
+  assert.equal((await find()).max, 5);
+  await call('PUT', '/settings', { shop_enabled: '0' });
+});

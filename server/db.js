@@ -236,6 +236,7 @@ addColumn('quotes', 'source', "TEXT NOT NULL DEFAULT 'interno'"); // interno | w
 addColumn('quotes', 'contact_phone', 'TEXT');
 addColumn('quotes', 'contact_address', 'TEXT');
 addColumn('customers', 'shop_token', 'TEXT');
+addColumn('quotes', 'status_changed_at', 'TEXT');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_shop_token ON customers(shop_token)');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;

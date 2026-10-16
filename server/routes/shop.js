@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { db, round2, UPLOADS_DIR } = require('../db');
-const { HttpError, getSetting, getPriceList, priceFor, defaultPriceListId } = require('../services');
+const { HttpError, getSetting, getPriceList, priceFor, defaultPriceListId, reservedMap, assertAvailable } = require('../services');
 
 const router = express.Router();
 
@@ -61,11 +61,13 @@ function context(req) {
   return { cfg, customer, list };
 }
 
-function availability(p, cfg) {
-  if (p.stock <= 0) return { available: false, label: 'Sin stock' };
-  if (cfg.stockMode === 'exacto') return { available: true, label: `${Number.isInteger(p.stock) ? p.stock : p.stock.toFixed(2)} disponibles`, stock: p.stock };
-  if (p.min_stock > 0 && p.stock <= p.min_stock) return { available: true, label: 'Últimas unidades' };
-  return { available: true, label: 'Disponible' };
+/** Disponible = stock − lo reservado por otros pedidos web en curso. max limita lo que se puede pedir. */
+function availability(p, cfg, reserved) {
+  const free = Math.max(0, Math.floor((p.stock - (reserved.get(p.id) || 0)) * 100) / 100);
+  if (free <= 0) return { available: false, label: 'Sin stock', max: 0 };
+  if (cfg.stockMode === 'exacto') return { available: true, label: `${free} disponibles`, max: free };
+  if (p.min_stock > 0 && free <= p.min_stock) return { available: true, label: 'Últimas unidades', max: free };
+  return { available: true, label: 'Disponible', max: free };
 }
 
 router.get('/info', (req, res) => {
@@ -95,12 +97,16 @@ router.get('/products', (req, res) => {
       `SELECT p.id, p.name, p.brand, p.presentation, p.description, p.units_per_pack, p.stock, p.min_stock, p.image, p.cost,
               p.category_id, c.name category
        FROM products p LEFT JOIN categories c ON c.id = p.category_id
-       WHERE p.active = 1 ${cfg.hideOutOfStock ? 'AND p.stock > 0' : ''}
+       WHERE p.active = 1
        ORDER BY COALESCE(c.name, 'zzz'), p.name`
     )
     .all();
+  const reserved = reservedMap();
   res.json(
-    rows.map((p) => {
+    rows
+      .map((p) => ({ p, a: availability(p, cfg, reserved) }))
+      .filter(({ a }) => !cfg.hideOutOfStock || a.available)
+      .map(({ p, a }) => {
       const price = list ? priceFor(p, list).price : null;
       return {
         id: p.id,
@@ -114,7 +120,7 @@ router.get('/products', (req, res) => {
         price,
         pack_price: price !== null && p.units_per_pack > 1 ? round2(price * p.units_per_pack) : null,
         image_url: p.image ? `/api/shop/img/${p.id}` : null,
-        ...availability(p, cfg),
+        ...a,
       };
     })
   );
@@ -169,18 +175,21 @@ router.post('/orders', (req, res) => {
     const p = db.prepare('SELECT * FROM products WHERE id = ? AND active = 1').get(id);
     if (!p) continue;
     const unit = list ? priceFor(p, list).price : 0;
-    lines.push({ p, qty, unit, subtotal: round2(qty * unit) });
+    lines.push({ p, product: p, qty, unit, subtotal: round2(qty * unit) });
   }
   if (!lines.length) throw new HttpError(400, 'Los productos del pedido ya no están disponibles');
   const total = round2(lines.reduce((a, l) => a + l.subtotal, 0));
   if (list && cfg.minOrder && total < cfg.minOrder) throw new HttpError(400, `El pedido mínimo es de ${money(cfg.minOrder)}`);
 
   const id = db.transaction(() => {
+    // No se puede pedir más de lo disponible (stock − reservas de otros pedidos). Dentro de la
+    // transacción, así dos pedidos simultáneos no reservan la misma mercadería.
+    assertAvailable(lines);
     const validDays = Math.max(1, Math.round(Number(getSetting('quote_valid_days')) || 7));
     const qid = db
       .prepare(
-        `INSERT INTO quotes (customer_id, customer_name, price_list_id, subtotal, discount, total, valid_until, notes, source, contact_phone, contact_address)
-         VALUES (?,?,?,?,0,?,?,?, 'web', ?, ?)`
+        `INSERT INTO quotes (customer_id, customer_name, price_list_id, subtotal, discount, total, valid_until, notes, source, contact_phone, contact_address, status_changed_at)
+         VALUES (?,?,?,?,0,?,?,?, 'web', ?, ?, datetime('now','localtime'))`
       )
       .run(
         customer ? customer.id : null,

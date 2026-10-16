@@ -9,6 +9,9 @@ const {
   addAccount,
   addStock,
   getSetting,
+  ORDER_ACTIVE,
+  assertAvailable,
+  reservedMap,
 } = require('../services');
 const { emptyToNull, num } = require('./catalog');
 
@@ -122,7 +125,7 @@ sales.post('/', (req, res) => {
   const { customer, list, lines, subtotal, discount, total } = buildLines(body, 'La venta');
   const quote = body.quote_id ? db.prepare('SELECT * FROM quotes WHERE id = ?').get(body.quote_id) : null;
   if (body.quote_id && !quote) throw new HttpError(404, 'Presupuesto no encontrado');
-  if (quote && quote.status !== 'pendiente') throw new HttpError(400, `El presupuesto #${quote.id} ya está ${quote.status}`);
+  if (quote && !ORDER_ACTIVE.includes(quote.status)) throw new HttpError(400, `El ${quote.source === 'web' ? 'pedido' : 'presupuesto'} #${quote.id} ya está ${quote.status}`);
   const pay = splitPayment(total, body.paid_cash, body.paid_transfer);
   if (pay.onAccount > 0.004 && !customer)
     throw new HttpError(400, 'Para dejar saldo en cuenta corriente tenés que elegir un cliente');
@@ -156,7 +159,8 @@ sales.post('/', (req, res) => {
     addCash('efectivo', pay.paidCash, `Venta #${saleId}${who}`, 'venta', saleId);
     addCash('transferencia', pay.paidTransfer, `Venta #${saleId}${who}`, 'venta', saleId);
     if (customer) addAccount('cliente', customer.id, pay.onAccount, `Venta #${saleId} (a cuenta)`, 'venta', saleId);
-    if (quote) db.prepare("UPDATE quotes SET status = 'vendido', sale_id = ? WHERE id = ?").run(saleId, quote.id);
+    if (quote)
+      db.prepare("UPDATE quotes SET status = 'vendido', sale_id = ?, status_changed_at = datetime('now','localtime') WHERE id = ?").run(saleId, quote.id);
     return saleId;
   })();
 
@@ -175,7 +179,7 @@ sales.post('/:id/cancel', (req, res) => {
     // Los remitos de la venta quedan anulados
     db.prepare("UPDATE remitos SET status = 'anulado' WHERE sale_id = ?").run(sale.id);
     // Si la venta salió de un presupuesto, el presupuesto vuelve a quedar pendiente
-    db.prepare("UPDATE quotes SET status = 'pendiente', sale_id = NULL WHERE sale_id = ?").run(sale.id);
+    db.prepare("UPDATE quotes SET status = 'pendiente', sale_id = NULL, status_changed_at = datetime('now','localtime') WHERE sale_id = ?").run(sale.id);
   })();
   res.json({ ok: true });
 });
@@ -191,7 +195,8 @@ quotes.get('/', (req, res) => {
     where.push('q.customer_id = ?');
     params.push(req.query.customer_id);
   }
-  if (req.query.status) {
+  if (req.query.status === 'activos') where.push(`q.status IN (${ORDER_ACTIVE.map(() => '?').join(',')})`), params.push(...ORDER_ACTIVE);
+  else if (req.query.status) {
     where.push('q.status = ?');
     params.push(req.query.status);
   }
@@ -226,13 +231,17 @@ function getQuote(id) {
        LEFT JOIN products p ON p.id = i.product_id WHERE i.quote_id = ? ORDER BY i.id`
     )
     .all(id);
+  // Disponible para este pedido = stock − reservas de los demás pedidos web
+  const reserved = reservedMap(q.id);
+  for (const i of q.items) if (i.product_id) i.available = Math.round((i.stock - (reserved.get(i.product_id) || 0)) * 100) / 100;
   return q;
 }
 
 quotes.get('/:id', (req, res) => res.json(getQuote(req.params.id)));
 
-function saveQuote(body, id) {
+function saveQuote(body, id, { web } = {}) {
   const { customer, list, lines, subtotal, discount, total } = buildLines(body, 'El presupuesto');
+  if (web) assertAvailable(lines, id);
   const validDays = Math.max(0, Math.round(num(body.valid_days, num(getSetting('quote_valid_days'), 7))));
   const fields = [
     customer ? customer.id : null,
@@ -249,6 +258,8 @@ function saveQuote(body, id) {
       db.prepare(
         `UPDATE quotes SET customer_id=?, customer_name=?, price_list_id=?, subtotal=?, discount=?, total=?, valid_until=?, notes=? WHERE id=?`
       ).run(...fields, id);
+      // Un pedido web editado queda marcado como "Modificado"
+      if (web) db.prepare("UPDATE quotes SET status = 'modificado', status_changed_at = datetime('now','localtime') WHERE id = ?").run(id);
       db.prepare('DELETE FROM quote_items WHERE quote_id = ?').run(id);
     } else {
       id = db
@@ -269,14 +280,25 @@ quotes.post('/', (req, res) => res.status(201).json(saveQuote(req.body)));
 
 quotes.put('/:id', (req, res) => {
   const q = getQuote(req.params.id);
-  if (q.status !== 'pendiente') throw new HttpError(400, `El presupuesto ya está ${q.status}; no se puede modificar`);
-  res.json(saveQuote(req.body, q.id));
+  if (!ORDER_ACTIVE.includes(q.status)) throw new HttpError(400, `Ya está ${q.status}; no se puede modificar`);
+  res.json(saveQuote(req.body, q.id, { web: q.source === 'web' }));
 });
 
+/** Cancela un presupuesto o pedido web. En los pedidos web libera la mercadería reservada. */
 quotes.post('/:id/cancel', (req, res) => {
   const q = getQuote(req.params.id);
-  if (q.status !== 'pendiente') throw new HttpError(400, `El presupuesto ya está ${q.status}`);
-  db.prepare("UPDATE quotes SET status = 'anulado' WHERE id = ?").run(q.id);
+  if (!ORDER_ACTIVE.includes(q.status)) throw new HttpError(400, `Ya está ${q.status}`);
+  db.prepare("UPDATE quotes SET status = 'anulado', status_changed_at = datetime('now','localtime') WHERE id = ?").run(q.id);
+  res.json({ ok: true });
+});
+
+/** Cambia el estado de un pedido web en curso: pendiente (nuevo) | confirmado | listo | modificado */
+quotes.post('/:id/status', (req, res) => {
+  const q = getQuote(req.params.id);
+  const status = String(req.body.status || '');
+  if (!ORDER_ACTIVE.includes(q.status)) throw new HttpError(400, `El pedido ya está ${q.status}`);
+  if (!ORDER_ACTIVE.includes(status)) throw new HttpError(400, 'Estado inválido');
+  db.prepare("UPDATE quotes SET status = ?, status_changed_at = datetime('now','localtime') WHERE id = ?").run(status, q.id);
   res.json({ ok: true });
 });
 

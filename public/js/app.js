@@ -219,7 +219,7 @@ function productPicker(input, { listId, onPick }) {
         (p, i) => `<div class="item ${i === sel ? 'sel' : ''}" data-i="${i}">
           ${p.image_url ? `<img src="${esc(p.image_url)}">` : '<div class="noimg">🍾</div>'}
           <div class="grow"><div><b>${esc(p.name)}</b> <span class="muted">${esc(p.presentation || '')}</span></div>
-          <div class="muted">${esc(p.barcode || p.code || '')} · Stock: ${qty(p.stock)}</div></div>
+          <div class="muted">${esc(p.barcode || p.code || '')} · Disponible: ${qty(p.available ?? p.stock)}${p.reserved ? ` (${qty(p.reserved)} reservado)` : ''}</div></div>
           <div><b>${money(p.price)}</b></div></div>`
       )
       .join('');
@@ -337,14 +337,16 @@ views.vender = {
       <div class="pos-layout">
         <div>
           ${pos.quote_id ? `<div class="card" style="background:var(--primary-soft);border-color:var(--primary)">
-            📄 Trabajando sobre el <b>presupuesto #${pos.quote_id}</b>: podés modificarlo y guardarlo, o confirmar la venta.
+            ${pos.quote_source === 'web'
+              ? `🛍️ Trabajando sobre el <b>pedido web N° ${pos.quote_id}</b>: si cambiás productos o cantidades tocá <b>Guardar pedido</b> (queda como "Modificado"), o cobralo con <b>Confirmar venta</b>.`
+              : `📄 Trabajando sobre el <b>presupuesto #${pos.quote_id}</b>: podés modificarlo y guardarlo, o confirmar la venta.`}
             <div class="toolbar" style="margin:8px 0 0"><button class="btn sm" id="quoteReprice">🔄 Actualizar a precios actuales</button>
             <button class="btn sm" id="quoteUnlink">Desvincular</button></div></div>` : ''}
           <div class="card">
             <div class="field"><input id="posSearch" class="big" placeholder="🔍 Escaneá el código de barras o buscá por nombre / código" autocomplete="off"></div>
           </div>
           <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
-            <thead><tr><th></th><th>Producto</th><th class="n">Stock</th><th class="n">Cantidad</th><th class="n">Precio unit.</th><th class="n">Subtotal</th><th></th></tr></thead>
+            <thead><tr><th></th><th>Producto</th><th class="n">Disponible</th><th class="n">Cantidad</th><th class="n">Precio unit.</th><th class="n">Subtotal</th><th></th></tr></thead>
             <tbody id="cartBody"></tbody></table></div></div>
         </div>
         <div>
@@ -371,7 +373,7 @@ views.vender = {
             ${field('Notas', `<input id="posNotes" value="${esc(pos.notes)}" placeholder="Opcional">`)}
             <div class="toolbar" style="margin-top:12px">
               <button class="btn" id="posClear">Vaciar</button><span class="spacer"></span>
-              <button class="btn" id="posQuote" title="Guardar como presupuesto: no descuenta stock ni mueve caja">📄 ${pos.quote_id ? 'Guardar presupuesto' : 'Presupuesto'}</button>
+              <button class="btn" id="posQuote" title="Guardar como presupuesto: no descuenta stock ni mueve caja">📄 ${pos.quote_id ? (pos.quote_source === 'web' ? 'Guardar pedido' : 'Guardar presupuesto') : 'Presupuesto'}</button>
               <button class="btn ok lg" id="posConfirm">✔ Confirmar venta</button>
             </div>
           </div>
@@ -394,7 +396,7 @@ views.vender = {
             (i, idx) => `<tr>
             <td>${i.image_url ? `<img class="thumb" src="${esc(i.image_url)}">` : '<div class="thumb"></div>'}</td>
             <td><b>${esc(i.name)}</b>${i.units_per_pack > 1 ? `<br><button class="btn sm" data-pack="${idx}">+ bulto x${i.units_per_pack}</button>` : ''}</td>
-            <td class="n ${i.stock - i.quantity < 0 ? 'neg' : 'muted'}">${qty(i.stock)}</td>
+            <td class="n ${i.stock - i.quantity < 0 ? 'neg' : 'muted'}" title="Disponible para vender (stock menos lo reservado por pedidos web)">${qty(i.stock)}</td>
             <td class="n"><input class="cart-qty" data-qty="${idx}" value="${i.quantity}"></td>
             <td class="n"><input class="cart-price" data-price="${idx}" value="${i.unit_price}"></td>
             <td class="n"><b>${money(i.quantity * i.unit_price)}</b></td>
@@ -444,7 +446,7 @@ views.vender = {
         const ex = pos.cart.find((i) => i.product_id === p.id);
         if (ex) ex.quantity += 1;
         else
-          pos.cart.push({ product_id: p.id, name: p.name, quantity: 1, unit_price: p.price, stock: p.stock, image_url: p.image_url, units_per_pack: p.units_per_pack });
+          pos.cart.push({ product_id: p.id, name: p.name, quantity: 1, unit_price: p.price, stock: p.available ?? p.stock, image_url: p.image_url, units_per_pack: p.units_per_pack });
         renderCart();
       },
     });
@@ -506,7 +508,7 @@ views.vender = {
         })
     );
     const reset = () => {
-      Object.assign(pos, { cart: [], customer_id: '', customer_name: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '', price_list_id: defaultList(lists), quote_id: null });
+      Object.assign(pos, { cart: [], customer_id: '', customer_name: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '', price_list_id: defaultList(lists), quote_id: null, quote_source: '' });
     };
     $('#posClear').onclick = () => {
       reset();
@@ -514,6 +516,15 @@ views.vender = {
     };
     $('#posConfirm').onclick = safe(async () => {
       if (!pos.cart.length) throw new Error('Agregá productos a la venta');
+      const over = pos.cart.filter((i) => i.quantity > i.stock);
+      if (
+        over.length &&
+        !(await confirmDialog(
+          `Supera lo disponible: ${over.map((i) => `${i.name} (disponible ${qty(Math.max(0, i.stock))})`).join(', ')}. Puede haber mercadería reservada para pedidos web. ¿Vender igual?`,
+          'Vender igual'
+        ))
+      )
+        return;
       const { total } = totals();
       if (!pos.paid_cash && !pos.paid_transfer && !pos.customer_id) {
         // Sin pago indicado y sin cliente: asumimos efectivo
@@ -576,10 +587,16 @@ views.vender = {
                 valid_days: num(f.valid_days),
                 notes: f.notes,
               };
+              const isWeb = pos.quote_source === 'web';
               const r = pos.quote_id
                 ? await api('/quotes/' + pos.quote_id, { method: 'PUT', body })
                 : await api('/quotes', { method: 'POST', body });
               reset();
+              if (isWeb) {
+                toast(`Pedido web N° ${r.id} guardado como "Modificado". Avisale al cliente desde Pedidos web.`, 'ok');
+                location.hash = '#/pedidos';
+                return;
+              }
               views.vender.render(view);
               modal({
                 title: `Presupuesto #${r.id} guardado`,
@@ -609,9 +626,226 @@ views.vender = {
   },
 };
 
+// ---------- Pedidos web (tienda online) ----------
+const ORDER_STATES = {
+  pendiente: ['🆕 Nuevo', 'warn'],
+  confirmado: ['✅ Confirmado / en preparación', 'info'],
+  listo: ['📦 Listo para entregar', 'ok'],
+  modificado: ['✏️ Modificado', 'warn'],
+  vendido: ['💰 Entregado y cobrado', 'ok'],
+  anulado: ['✕ Cancelado', 'danger'],
+};
+const ORDER_ACTIVE = ['pendiente', 'confirmado', 'listo', 'modificado'];
+
+/** Número de WhatsApp argentino (549 + área + número) a partir de cómo esté escrito */
+function waNumber(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('00')) d = d.slice(2);
+  if (!d.startsWith('54')) {
+    d = d.replace(/^0/, '');
+    if (d.length === 12) d = d.replace(/^(\d{2,4})15(\d{6,8})$/, (m, a, n) => (a.length + n.length === 10 ? a + n : m));
+    if (d.length === 10) d = '549' + d;
+  } else if (!d.startsWith('549') && d.length === 12) d = '549' + d.slice(2);
+  return d;
+}
+
+/** Mensaje para avisarle al cliente cómo va su pedido */
+function orderMessage(q, business) {
+  const items = q.items.map((i) => `• ${qty(i.quantity)} x ${i.description}`).join('\n');
+  const total = `Total: ${money(q.total)}`;
+  const hi = `¡Hola ${q.customer_name || ''}! Te escribimos de ${business}.`;
+  const by = {
+    pendiente: `${hi} Recibimos tu pedido N° ${q.id}. En breve te lo confirmamos.`,
+    confirmado: `${hi} Tu pedido N° ${q.id} está confirmado y lo estamos preparando.\n\n${items}\n\n${total}`,
+    listo: `${hi} Tu pedido N° ${q.id} está listo para entregar.\n\n${items}\n\n${total}`,
+    modificado: `${hi} Tuvimos que hacer cambios en tu pedido N° ${q.id}. Así queda:\n\n${items}\n\n${total}\n\n¿Está bien así?`,
+    vendido: `${hi} ¡Gracias por tu compra! Pedido N° ${q.id} entregado.`,
+    anulado: `${hi} Tu pedido N° ${q.id} fue cancelado. Cualquier consulta escribinos.`,
+  };
+  return by[q.status] || by.pendiente;
+}
+
+/** Cobra un pedido web: crea la venta (descuenta stock, mueve caja / cuenta corriente) y libera la reserva */
+async function closeOrder(id, onDone) {
+  const q = await api('/quotes/' + id);
+  const missing = q.items.filter((i) => !i.product_id);
+  if (missing.length) throw new Error('El pedido tiene productos que ya no existen: editalo antes de cobrarlo');
+  modal({
+    title: `Cobrar y cerrar pedido N° ${q.id}`,
+    body: `<p>Cliente: <b>${esc(q.customer_name || 'Consumidor final')}</b> · ${q.items.length} productos</p>
+      <div class="total-box">${money(q.total)}</div>
+      <div class="toolbar" style="margin:8px 0">
+        <button type="button" class="btn sm" data-fill="efectivo">Todo efectivo</button>
+        <button type="button" class="btn sm" data-fill="transferencia">Todo transferencia</button>
+        ${q.customer_id ? '<button type="button" class="btn sm" data-fill="cc">Todo a cuenta</button>' : ''}
+      </div>
+      <div class="pay-grid">
+        ${field('💵 Efectivo', '<input name="paid_cash" inputmode="decimal" placeholder="0">')}
+        ${field('🏦 Transferencia', '<input name="paid_transfer" inputmode="decimal" placeholder="0">')}
+      </div>
+      <p class="muted" id="closeInfo"></p>
+      <p class="muted" style="font-size:12px">Al cerrar se registra la venta, se descuenta el stock y se libera la reserva. ${q.customer_id ? 'Lo que no se pague queda en la cuenta corriente del cliente.' : 'Como no es un cliente cargado, tiene que pagarse completo.'}</p>`,
+    onOpen(el) {
+      const info = () => {
+        const rest = round2(q.total - num($('[name=paid_cash]', el).value) - num($('[name=paid_transfer]', el).value));
+        $('#closeInfo', el).innerHTML =
+          rest > 0.004 ? `A cuenta corriente: <b>${money(rest)}</b>` : rest < -0.004 ? `Vuelto: <b>${money(-rest)}</b>` : total ? 'Pagado completo' : '';
+      };
+      const total = q.total;
+      $$('[data-fill]', el).forEach(
+        (b) =>
+          (b.onclick = () => {
+            $('[name=paid_cash]', el).value = b.dataset.fill === 'efectivo' ? total : '';
+            $('[name=paid_transfer]', el).value = b.dataset.fill === 'transferencia' ? total : '';
+            info();
+          })
+      );
+      $$('input', el).forEach((i) => (i.oninput = info));
+      info();
+    },
+    actions: [
+      { label: 'Cancelar' },
+      {
+        label: '✔ Cerrar venta',
+        cls: 'ok',
+        onClick: async (el) => {
+          const f = formData(el);
+          const r = await api('/sales', {
+            method: 'POST',
+            body: {
+              quote_id: q.id,
+              customer_id: q.customer_id || null,
+              price_list_id: q.price_list_id,
+              items: q.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+              discount: q.discount,
+              paid_cash: num(f.paid_cash),
+              paid_transfer: num(f.paid_transfer),
+              notes: [`Pedido web N° ${q.id}`, q.notes].filter(Boolean).join(' · '),
+            },
+          });
+          refreshTopBalances();
+          onDone && onDone();
+          modal({
+            title: `Venta #${r.id} registrada`,
+            body: `<div class="total-box">${money(r.total)}</div>${r.change ? `<p>Vuelto: <b>${money(r.change)}</b></p>` : ''}${r.on_account ? `<p>Quedó en cuenta corriente: <b>${money(r.on_account)}</b></p>` : ''}
+              <p class="muted">El pedido N° ${q.id} quedó como <b>Entregado y cobrado</b> y el stock se descontó.</p>`,
+            actions: [
+              { label: '📃 Remito', onClick: () => { remitoForm(r.id); return false; } },
+              { label: '⬇️ PDF', onClick: () => { download(`/api/sales/${r.id}/pdf`); return false; } },
+              { label: 'Listo', cls: 'primary' },
+            ],
+          });
+        },
+      },
+    ],
+  });
+}
+
 views.pedidos = {
   title: 'Pedidos web',
-  render: (view, params) => views.presupuestos.render(view, params, 'web'),
+  async render(view) {
+    const [customers, settings] = await Promise.all([api('/customers?include_inactive=1'), api('/settings')]);
+    const from = new Date(Date.now() - 60 * 864e5).toLocaleDateString('sv-SE');
+    view.innerHTML = `
+      <div class="card" style="background:var(--primary-soft)">🛍️ Pedidos de la <b>tienda online</b>. Mientras están en curso, la mercadería queda <b>reservada</b>: no se puede vender a otro ni pedir desde la tienda.
+        Si se cancela, vuelve a estar disponible. Al <b>cobrar y cerrar</b> se registra la venta y se descuenta del stock.
+        <div class="toolbar" style="margin:8px 0 0"><a class="btn sm" href="/tienda" target="_blank">Ver la tienda</a><a class="btn sm" href="#/config">Configurar tienda</a></div></div>
+      <div class="grid cols-4" id="oStats"></div>
+      <div class="toolbar" style="margin-top:16px">
+        <select id="fStatus"><option value="activos">En curso</option>${Object.entries(ORDER_STATES).map(([k, [l]]) => opt(k, l)).join('')}<option value="">Todos</option></select>
+        <select id="fCustomer"><option value="">Todos los clientes</option>${customers.map((c) => opt(c.id, c.name)).join('')}</select>
+        <input type="date" id="fFrom" value="${from}"> <input type="date" id="fTo" value="${today()}">
+      </div>
+      <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="oBody"></tbody></table></div></div>`;
+    let rows = [];
+    const load = safe(async () => {
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source: 'web' });
+      rows = await api('/quotes?' + qs);
+      refreshPendingOrders();
+      const active = await api('/quotes?status=activos&source=web&limit=2000');
+      const count = (st) => active.filter((q) => q.status === st).length;
+      $('#oStats').innerHTML = ORDER_ACTIVE.map(
+        (st) => `<div class="stat ${ORDER_STATES[st][1] === 'ok' ? 'ok' : ''}" style="cursor:pointer" data-filter="${st}"><div class="label">${ORDER_STATES[st][0]}</div><div class="value">${count(st)}</div></div>`
+      ).join('');
+      $('#oBody').innerHTML = rows.length
+        ? rows
+            .map((q) => {
+              const isActive = ORDER_ACTIVE.includes(q.status);
+              const [label, cls] = ORDER_STATES[q.status] || [q.status, ''];
+              const state = isActive
+                ? `<select data-status="${q.id}" style="min-width:190px">${ORDER_ACTIVE.map((st) => opt(st, ORDER_STATES[st][0], q.status)).join('')}</select>
+                   ${q.status_changed_at ? `<div class="muted" style="font-size:11px">desde ${esc(q.status_changed_at.slice(5, 16))}</div>` : ''}`
+                : `<span class="badge ${cls}">${label}</span>${q.sale_id ? ` <span class="muted">Venta #${q.sale_id}</span>` : ''}`;
+              return `<tr><td><b>${q.id}</b></td><td style="white-space:nowrap">${esc(q.date.slice(0, 16))}</td>
+                <td style="min-width:200px"><b>${esc(q.customer_name || 'Consumidor final')}</b>
+                  ${q.contact_phone ? `<div class="muted" style="font-size:12px">📞 ${esc(q.contact_phone)}${q.contact_address ? ' · ' + esc(q.contact_address) : ''}</div>` : ''}
+                  ${q.notes ? `<div class="muted" style="font-size:12px">📝 ${esc(q.notes)}</div>` : ''}</td>
+                <td class="n"><b>${money(q.total)}</b><div class="muted" style="font-size:12px">${q.items} productos</div></td>
+                <td>${state}</td>
+                <td class="actions" style="white-space:normal;min-width:240px;max-width:330px">
+                  <button class="btn sm" data-see="${q.id}">👁 Ver</button>
+                  <button class="btn sm" data-notify="${q.id}" title="Avisarle al cliente por WhatsApp">💬 Avisar</button>
+                  ${isActive ? `<button class="btn sm" data-edit="${q.id}" title="Cambiar productos o cantidades">✏️ Editar</button>
+                    <button class="btn sm ok" data-close="${q.id}">💰 Cobrar y cerrar</button>
+                    <button class="btn sm danger" data-cancel="${q.id}">Cancelar</button>` : ''}
+                  ${q.sale_id ? `<a class="btn sm" href="/api/sales/${q.sale_id}/pdf" download>⬇️ PDF</a>` : `<a class="btn sm" href="/api/quotes/${q.id}/pdf" download>⬇️ PDF</a>`}
+                </td></tr>`;
+            })
+            .join('')
+        : '<tr><td colspan="6" class="empty">No hay pedidos con esos filtros</td></tr>';
+    });
+    ['#fFrom', '#fTo', '#fCustomer', '#fStatus'].forEach((sel) => ($(sel).onchange = load));
+    $('#oStats').onclick = (e) => {
+      const t = e.target.closest('[data-filter]');
+      if (!t) return;
+      $('#fStatus').value = t.dataset.filter;
+      load();
+    };
+    $('#oBody').addEventListener('change', safe(async (e) => {
+      const id = e.target.dataset.status;
+      if (!id) return;
+      await api(`/quotes/${id}/status`, { method: 'POST', body: { status: e.target.value } });
+      toast(`Pedido N° ${id}: ${ORDER_STATES[e.target.value][0]}`, 'ok');
+      load();
+    }));
+    $('#oBody').onclick = safe(async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const d = b.dataset;
+      if (d.see) {
+        const q = await api('/quotes/' + d.see);
+        modal({
+          title: `Pedido web N° ${q.id} — ${(ORDER_STATES[q.status] || [q.status])[0]}`,
+          wide: true,
+          body: `<p><b>${esc(q.customer_name || 'Consumidor final')}</b> ${q.customer_phone ? '· 📞 ' + esc(q.customer_phone) : ''} ${q.customer_address ? '· 📍 ' + esc(q.customer_address) : ''}</p>
+            ${q.notes ? `<p>📝 ${esc(q.notes)}</p>` : ''}
+            <table class="table"><thead><tr><th>Producto</th><th class="n">Cantidad</th><th class="n">Disponible</th><th class="n">P. unit.</th><th class="n">Subtotal</th></tr></thead><tbody>
+            ${q.items.map((i) => `<tr><td>${esc(i.description)}</td><td class="n"><b>${qty(i.quantity)}</b></td>
+              <td class="n ${i.available !== undefined && i.available < i.quantity ? 'neg' : 'muted'}">${i.available !== undefined ? qty(i.available) : '—'}</td>
+              <td class="n">${money(i.unit_price)}</td><td class="n">${money(i.subtotal)}</td></tr>`).join('')}</tbody></table>
+            <p style="text-align:right;font-size:18px"><b>Total: ${money(q.total)}</b></p>
+            <p class="muted" style="font-size:12px">"Disponible" = stock menos lo reservado por otros pedidos. Este pedido ya tiene su mercadería reservada.</p>`,
+          actions: [{ label: 'Cerrar', cls: 'primary' }],
+        });
+      }
+      if (d.notify) {
+        const q = await api('/quotes/' + d.notify);
+        const phone = waNumber(q.customer_phone);
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(orderMessage(q, settings.business_name || ''))}`, '_blank');
+      }
+      if (d.edit) await openQuoteInPos(d.edit);
+      if (d.close) await closeOrder(d.close, load);
+      if (d.cancel && (await confirmDialog(`¿Cancelar el pedido N° ${d.cancel}? La mercadería reservada vuelve a estar disponible.`, 'Cancelar pedido'))) {
+        await api(`/quotes/${d.cancel}/cancel`, { method: 'POST' });
+        toast('Pedido cancelado: la mercadería volvió a estar disponible', 'ok');
+        load();
+      }
+    });
+    load();
+  },
 };
 
 /** Muestra en el menú cuántos pedidos web hay pendientes */
@@ -638,7 +872,7 @@ async function openQuoteInPos(id, duplicate = false) {
         name: i.description,
         quantity: i.quantity,
         unit_price: i.unit_price,
-        stock: i.stock ?? 0,
+        stock: i.available ?? i.stock ?? 0,
         image_url: i.image ? `/uploads/${i.image}` : null,
         units_per_pack: i.units_per_pack || 1,
       })),
@@ -650,6 +884,7 @@ async function openQuoteInPos(id, duplicate = false) {
     paid_transfer: '',
     notes: q.notes || '',
     quote_id: duplicate ? null : q.id,
+    quote_source: duplicate ? '' : q.source,
   });
   if (missing.length) toast(`${missing.length} productos del presupuesto ya no existen y no se cargaron`, 'error');
   if (location.hash === '#/vender') route();
@@ -683,7 +918,7 @@ views.presupuestos = {
       return '<span class="badge info">Pendiente</span>';
     };
     const load = safe(async () => {
-      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source });
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source: source || 'interno' });
       const rows = await api('/quotes?' + qs);
       if (web) refreshPendingOrders();
       $('#qBody').innerHTML = rows.length
@@ -1967,7 +2202,9 @@ views.catalogo = {
       const units = rows.reduce((a, p) => a + Math.max(0, p.stock), 0);
       const value = rows.reduce((a, p) => a + Math.max(0, p.stock) * p.cost, 0);
       $('#cStats').innerHTML = `${rows.length} productos · ${qty(units)} unidades en stock · valorizado al costo ${money(value)}`;
-      const stockBadge = (p) => `<span class="badge ${p.stock <= 0 ? 'danger' : p.stock <= p.min_stock ? 'warn' : 'ok'}">Stock: ${qty(p.stock)}</span>`;
+      const stockBadge = (p) =>
+        `<span class="badge ${p.available <= 0 ? 'danger' : p.available <= p.min_stock ? 'warn' : 'ok'}">Stock: ${qty(p.stock)}</span>` +
+        (p.reserved ? ` <span class="badge info" title="Reservado por pedidos web en curso">Reserv.: ${qty(p.reserved)} · Disp.: ${qty(p.available)}</span>` : '');
       if (!rows.length) {
         $('#cBody').innerHTML = '<div class="card empty">No hay productos. Creá uno nuevo o importalos desde un archivo Excel/CSV.</div>';
         return;

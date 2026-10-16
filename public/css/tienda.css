@@ -89,3 +89,4 @@ form input, form textarea { display: block; width: 100%; margin-top: 4px; font: 
   .drawer-panel { border-radius: 16px; }
   .card .img { height: 160px; }
 }
+.flash { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; background: #1e2533; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 30; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.25); max-width: 90vw; text-align: center; }

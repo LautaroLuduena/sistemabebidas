@@ -28,6 +28,38 @@ function logoFile() {
   return fs.existsSync(DEFAULT_LOGO) ? DEFAULT_LOGO : null;
 }
 
+/**
+ * Pedidos web en curso: su mercadería queda reservada (no se puede vender a otro)
+ * hasta que se cierra la venta o se cancela el pedido.
+ */
+const ORDER_ACTIVE = ['pendiente', 'confirmado', 'listo', 'modificado'];
+const ORDER_ACTIVE_SQL = ORDER_ACTIVE.map((s) => `'${s}'`).join(',');
+
+/** Cantidad reservada por producto. excludeQuoteId permite no contar la reserva del propio pedido. */
+function reservedMap(excludeQuoteId = -1) {
+  const rows = db
+    .prepare(
+      `SELECT i.product_id, SUM(i.quantity) qty FROM quote_items i JOIN quotes q ON q.id = i.quote_id
+       WHERE q.source = 'web' AND q.status IN (${ORDER_ACTIVE_SQL}) AND q.id <> ? AND i.product_id IS NOT NULL
+       GROUP BY i.product_id`
+    )
+    .all(excludeQuoteId);
+  return new Map(rows.map((r) => [r.product_id, r.qty]));
+}
+
+/** Verifica que haya stock disponible (stock − reservado) para cada línea. lines: [{ product, qty }] */
+function assertAvailable(lines, excludeQuoteId) {
+  const reserved = reservedMap(excludeQuoteId);
+  const merged = new Map();
+  for (const l of lines) if (l.product) merged.set(l.product.id, { p: l.product, qty: (merged.get(l.product.id)?.qty || 0) + l.qty });
+  const problems = [];
+  for (const { p, qty } of merged.values()) {
+    const available = Math.max(0, Math.round((p.stock - (reserved.get(p.id) || 0)) * 100) / 100);
+    if (qty > available + 1e-9) problems.push(available > 0 ? `${p.name}: solo hay ${available} disponibles` : `${p.name}: sin stock disponible`);
+  }
+  if (problems.length) throw new HttpError(409, problems.join(' · '));
+}
+
 function defaultPriceListId() {
   const row = db.prepare('SELECT id FROM price_lists ORDER BY is_default DESC, id ASC LIMIT 1').get();
   return row ? row.id : null;
@@ -104,6 +136,10 @@ function accountBalance(partyType, partyId) {
 }
 
 module.exports = {
+  ORDER_ACTIVE,
+  ORDER_ACTIVE_SQL,
+  reservedMap,
+  assertAvailable,
   HttpError,
   BOXES,
   getSetting,

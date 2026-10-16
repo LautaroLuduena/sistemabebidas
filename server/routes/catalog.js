@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { db, round2, UPLOADS_DIR } = require('../db');
-const { HttpError, getPriceList, priceFor, pricesForProduct, addStock, defaultPriceListId } = require('../services');
+const { HttpError, getPriceList, priceFor, pricesForProduct, addStock, defaultPriceListId, reservedMap } = require('../services');
 
 const router = express.Router();
 
@@ -159,10 +159,13 @@ router.post('/price-lists/:id/adjust', (req, res) => {
 // ---------- Productos ----------
 const PRODUCT_SELECT = `SELECT p.*, c.name category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id`;
 
-function decorate(product, list) {
+function decorate(product, list, reserved = reservedMap()) {
   if (!product) return product;
   product.image_url = product.image ? `/uploads/${product.image}` : null;
   if (list) product.price = priceFor(product, list).price;
+  // Reservado por pedidos web en curso; disponible = lo que se puede vender ahora
+  product.reserved = reserved.get(product.id) || 0;
+  product.available = Math.round((product.stock - product.reserved) * 100) / 100;
   return product;
 }
 
@@ -183,7 +186,8 @@ router.get('/products', (req, res) => {
   const sql = `${PRODUCT_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.name LIMIT ?`;
   params.push(Math.min(num(req.query.limit, 500), 5000));
   const list = getPriceList(req.query.price_list_id || defaultPriceListId());
-  const rows = db.prepare(sql).all(...params).map((p) => decorate(p, list));
+  const reserved = reservedMap();
+  const rows = db.prepare(sql).all(...params).map((p) => decorate(p, list, reserved));
   res.json(rows);
 });
 

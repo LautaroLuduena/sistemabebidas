@@ -89,14 +89,39 @@ function refreshCard(id) {
   if (p && el) el.innerHTML = controls(p);
 }
 
+/** Aviso breve (ej: "solo hay 5 disponibles") */
+function flash(text) {
+  let el = $('#flash');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'flash';
+    el.className = 'flash';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => (el.hidden = true), 2500);
+}
+
 function setQty(id, q) {
   q = Math.max(0, Math.round(q * 100) / 100);
+  const p = state.products.find((x) => x.id === id);
+  // No se puede pedir más de lo disponible
+  if (p && q > p.max) {
+    q = p.max;
+    flash(p.max > 0 ? `De ${p.name} hay ${fmtQty(p.max)} disponibles` : `${p.name} no tiene stock disponible`);
+  }
   if (q) state.cart[id] = q;
   else delete state.cart[id];
   saveCart();
-  refreshCard(id);
   renderCartBar();
-  if (!$('#drawer').hidden) renderCart();
+  // Se redibuja después del evento: si viene de escribir la cantidad (change/blur), reemplazar
+  // el campo en el mismo momento hace fallar al navegador
+  setTimeout(() => {
+    refreshCard(id);
+    if (!$('#drawer').hidden) renderCart();
+  });
 }
 
 // ---------- Carrito ----------
@@ -152,6 +177,7 @@ document.addEventListener('click', (e) => {
     const cur = state.cart[id] || 0;
     if (d.add) setQty(id, 1);
     if (d.pack) setQty(id, cur + (p ? p.units_per_pack : 1));
+    if (d.inc && p && cur >= p.max) return flash(`De ${p.name} hay ${fmtQty(p.max)} disponibles`);
     if (d.inc) setQty(id, cur + 1);
     if (d.dec) setQty(id, cur - 1);
   }
@@ -215,6 +241,19 @@ $('#orderForm').onsubmit = async (e) => {
   } catch (err) {
     if (waWindow) waWindow.close();
     $('#orderError').textContent = err.message;
+    // Si otro cliente reservó mercadería mientras tanto, se actualiza la disponibilidad y el carrito
+    if (/disponible|stock/i.test(err.message)) {
+      state.products = await api('/products' + qs).catch(() => state.products);
+      for (const [id, q] of Object.entries(state.cart)) {
+        const p = state.products.find((x) => x.id === Number(id));
+        if (!p || !p.available) delete state.cart[id];
+        else if (q > p.max) state.cart[id] = p.max;
+      }
+      saveCart();
+      renderProducts();
+      renderCartBar();
+      renderCart();
+    }
   } finally {
     $('#sendBtn').disabled = false;
   }
@@ -263,6 +302,13 @@ $('#orderForm').onsubmit = async (e) => {
     notice(err.message, 'error');
     return;
   }
+  // El carrito guardado no puede superar lo disponible hoy
+  for (const [id, q] of Object.entries(state.cart)) {
+    const p = state.products.find((x) => x.id === Number(id));
+    if (!p || !p.available) delete state.cart[id];
+    else if (q > p.max) state.cart[id] = p.max;
+  }
+  saveCart();
   renderProducts();
   renderCartBar();
 })();

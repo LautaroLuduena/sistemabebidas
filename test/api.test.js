@@ -279,3 +279,59 @@ test('historial y reportes mes a mes', async () => {
     assert.equal(res.status, 200, url);
   }
 });
+
+test('tienda online: desactivada por defecto, catálogo sin costos, pedido web y link personal', async () => {
+  const pub = (path, opts = {}) => fetch(base + '/shop' + path, opts).then(async (r) => ({ status: r.status, data: await r.json() }));
+  assert.equal((await pub('/info')).status, 403);
+
+  const lists = await call('GET', '/price-lists');
+  const mayorista = lists.find((l) => l.name === 'Mayorista');
+  await call('PUT', '/settings', { shop_enabled: '1', shop_whatsapp: '5493510000000', shop_stock_mode: 'disponible', shop_min_order: '' });
+  const info = await pub('/info');
+  assert.equal(info.status, 200);
+  assert.equal(info.data.show_prices, true);
+  const products = (await pub('/products')).data;
+  assert.ok(products.length > 0);
+  assert.ok(products.every((p) => p.cost === undefined && p.stock === undefined), 'no expone costo ni stock exacto');
+  const beer = products.find((p) => p.name === 'Cerveza 1L');
+  assert.equal(beer.label, 'Disponible');
+
+  const stockBefore = (await call('GET', `/products/${beer.id}`)).stock;
+  const order = await pub('/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Juan', phone: '351 555', address: 'Calle 1', items: [{ product_id: beer.id, quantity: 3 }, { product_id: beer.id, quantity: 1 }], unit_price: 1 }),
+  });
+  assert.equal(order.status, 201);
+  assert.match(order.data.whatsapp_url, /^https:\/\/wa\.me\/5493510000000\?text=/);
+  assert.ok(decodeURIComponent(order.data.whatsapp_url).includes('4 x Cerveza 1L'));
+  assert.equal(order.data.total, beer.price * 4); // el precio lo calcula el servidor
+  const q = await call('GET', `/quotes/${order.data.id}`);
+  assert.equal(q.source, 'web');
+  assert.equal(q.customer_phone, '351 555');
+  assert.equal((await call('GET', `/products/${beer.id}`)).stock, stockBefore); // no mueve stock
+  assert.ok((await call('GET', '/quotes?source=web')).some((x) => x.id === order.data.id));
+  assert.ok((await call('GET', '/shop/pending')).n >= 1);
+
+  // Validaciones
+  const bad = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'X', phone: '1', items: [] }) });
+  assert.equal(bad.status, 400);
+
+  // Link personal: precios de la lista del cliente, sin pedir teléfono
+  const { id: cid } = await call('POST', '/customers', { name: 'Kiosco Web', price_list_id: mayorista.id, phone: '351111' });
+  const { token } = await call('POST', `/customers/${cid}/shop-link`, {});
+  const personal = await pub(`/info?c=${token}`);
+  assert.equal(personal.data.customer.name, 'Kiosco Web');
+  const pBeer = (await pub(`/products?c=${token}`)).data.find((p) => p.id === beer.id);
+  assert.equal(pBeer.price, 1300); // precio fijo mayorista
+  const o2 = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ c: token, items: [{ product_id: beer.id, quantity: 2 }] }) });
+  assert.equal(o2.status, 201);
+  assert.equal((await call('GET', `/quotes/${o2.data.id}`)).customer_id, cid);
+  assert.equal((await pub('/info?c=token-falso')).status, 404);
+
+  // Modo privado
+  await call('PUT', '/settings', { shop_private: '1' });
+  assert.equal((await pub('/info')).status, 403);
+  assert.equal((await pub(`/info?c=${token}`)).status, 200);
+  await call('PUT', '/settings', { shop_private: '0', shop_enabled: '0' });
+});

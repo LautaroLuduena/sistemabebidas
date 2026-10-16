@@ -76,7 +76,8 @@ router.get('/settings', (req, res) => {
 });
 
 const ALLOWED_SETTINGS = ['business_name', 'business_address', 'business_phone', 'business_tax_id', 'price_list_footer', 'quote_footer', 'quote_valid_days',
-  'business_iva', 'business_iibb', 'business_start', 'remito_pv', 'remito_next', 'remito_copies', 'remito_valued', 'remito_footer'];
+  'business_iva', 'business_iibb', 'business_start', 'remito_pv', 'remito_next', 'remito_copies', 'remito_valued', 'remito_footer',
+  'shop_enabled', 'shop_whatsapp', 'shop_price_list', 'shop_stock_mode', 'shop_hide_out_of_stock', 'shop_private', 'shop_min_order', 'shop_message'];
 router.put('/settings', (req, res) => {
   const up = db.prepare('INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   db.transaction(() => {

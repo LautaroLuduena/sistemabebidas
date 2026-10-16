@@ -293,7 +293,8 @@ views[''] = {
   async render(view) {
     const d = await api('/dashboard');
     const max = Math.max(1, ...d.last7.map((x) => x.total));
-    view.innerHTML = `
+    const web = await api('/shop/pending').catch(() => ({ n: 0 }));
+    view.innerHTML = `${web.n ? `<a href="#/pedidos" class="card" style="display:block;text-decoration:none;color:inherit;background:var(--warn-soft);border-color:#f3c98b">🛍️ Tenés <b>${web.n} pedido${web.n > 1 ? 's' : ''} web</b> pendiente${web.n > 1 ? 's' : ''} de la tienda online. <u>Ver pedidos</u></a>` : ''}
       <div class="grid cols-4">
         <div class="stat"><div class="label">💵 Caja efectivo</div><div class="value">${money(d.boxes.efectivo)}</div></div>
         <div class="stat"><div class="label">🏦 Caja transferencia</div><div class="value">${money(d.boxes.transferencia)}</div></div>
@@ -608,6 +609,23 @@ views.vender = {
   },
 };
 
+views.pedidos = {
+  title: 'Pedidos web',
+  render: (view, params) => views.presupuestos.render(view, params, 'web'),
+};
+
+/** Muestra en el menú cuántos pedidos web hay pendientes */
+async function refreshPendingOrders() {
+  try {
+    const { n } = await api('/shop/pending');
+    const el = $('#webBadge');
+    el.textContent = n;
+    el.hidden = !n;
+  } catch {
+    /* ignorar */
+  }
+}
+
 /** Carga un presupuesto en Vender (para venderlo/editarlo, o como copia nueva si duplicate = true) */
 async function openQuoteInPos(id, duplicate = false) {
   const q = await api('/quotes/' + id);
@@ -641,17 +659,20 @@ async function openQuoteInPos(id, duplicate = false) {
 // ---------- Presupuestos ----------
 views.presupuestos = {
   title: 'Presupuestos',
-  async render(view) {
+  async render(view, params, source = '') {
+    const web = source === 'web';
     const customers = await api('/customers?include_inactive=1');
     const from = new Date(Date.now() - 60 * 864e5).toLocaleDateString('sv-SE');
     view.innerHTML = `
+      ${web ? `<div class="card" style="background:var(--primary-soft)">🛍️ Pedidos que hicieron los clientes desde la <b>tienda online</b>. Revisalos, tocá <b>🛒 Vender / editar</b> para ajustarlo y confirmar la venta (recién ahí se descuenta el stock).
+        <div class="toolbar" style="margin:8px 0 0"><a class="btn sm" href="/tienda" target="_blank">Ver la tienda</a><a class="btn sm" href="#/config">Configurar tienda</a></div></div>` : ''}
       <div class="toolbar">
         <input type="date" id="fFrom" value="${from}"> <input type="date" id="fTo" value="${today()}">
         <select id="fCustomer"><option value="">Todos los clientes</option>${customers.map((c) => opt(c.id, c.name)).join('')}</select>
         <select id="fStatus"><option value="pendiente">Pendientes</option><option value="vendido">Pasados a venta</option><option value="anulado">Anulados</option><option value="">Todos</option></select>
-        <span class="spacer"></span><a class="btn primary" href="#/vender" id="qNew">📄 Nuevo presupuesto</a>
+        <span class="spacer"></span>${web ? '' : '<a class="btn primary" href="#/vender" id="qNew">📄 Nuevo presupuesto</a>'}
       </div>
-      <p class="muted" style="margin-top:0">Los presupuestos se arman desde <b>Vender</b>: cargá los productos y tocá <b>📄 Presupuesto</b>. No descuentan stock ni mueven la caja hasta que los pasás a venta.</p>
+      <p class="muted" style="margin-top:0" ${web ? 'hidden' : ''}>Los presupuestos se arman desde <b>Vender</b>: cargá los productos y tocá <b>📄 Presupuesto</b>. No descuentan stock ni mueven la caja hasta que los pasás a venta.</p>
       <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
         <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>Lista</th><th class="n">Total</th><th>Válido hasta</th><th>Estado</th><th></th></tr></thead>
         <tbody id="qBody"></tbody></table></div></div>`;
@@ -662,12 +683,14 @@ views.presupuestos = {
       return '<span class="badge info">Pendiente</span>';
     };
     const load = safe(async () => {
-      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value });
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source });
       const rows = await api('/quotes?' + qs);
+      if (web) refreshPendingOrders();
       $('#qBody').innerHTML = rows.length
         ? rows
             .map(
-              (q) => `<tr><td>${q.id}</td><td>${esc(q.date)}</td><td>${esc(q.customer_name || 'Consumidor final')}</td><td>${esc(q.price_list_name || '')}</td>
+              (q) => `<tr><td>${q.id}</td><td>${esc(q.date)}</td><td>${esc(q.customer_name || 'Consumidor final')}${q.source === 'web' ? ' <span class="badge warn">🛍️ Web</span>' : ''}
+            ${q.contact_phone ? `<div class="muted" style="font-size:12px">📞 ${esc(q.contact_phone)}${q.contact_address ? ' · ' + esc(q.contact_address) : ''}</div>` : ''}${q.source === 'web' && q.notes ? `<div class="muted" style="font-size:12px">📝 ${esc(q.notes)}</div>` : ''}</td><td>${esc(q.price_list_name || '')}</td>
           <td class="n"><b>${money(q.total)}</b></td><td>${esc(q.valid_until ? q.valid_until.split('-').reverse().join('/') : '')}</td><td>${badge(q)}</td>
           <td class="actions"><a class="btn sm" href="/api/quotes/${q.id}/pdf" download>⬇️ PDF</a>
             <a class="btn sm" href="/api/quotes/${q.id}/print" target="_blank" title="Imprimir">🖨️</a>
@@ -679,9 +702,10 @@ views.presupuestos = {
         : '<tr><td colspan="8" class="empty">No hay presupuestos con esos filtros</td></tr>';
     });
     ['#fFrom', '#fTo', '#fCustomer', '#fStatus'].forEach((s) => ($(s).onchange = load));
-    $('#qNew').onclick = () => {
-      pos.quote_id = null;
-    };
+    if ($('#qNew'))
+      $('#qNew').onclick = () => {
+        pos.quote_id = null;
+      };
     $('#qBody').onclick = safe(async (e) => {
       const d = e.target.dataset;
       if (d.open) await openQuoteInPos(d.open);
@@ -1687,6 +1711,7 @@ function partyViews({ key, endpoint, singular, plural, isCustomer }) {
       <div class="toolbar"><a class="btn" href="#/${key}">← Volver</a><span class="spacer"></span>
         <button class="btn primary" id="dPay">${isCustomer ? '💰 Registrar cobro' : '💸 Registrar pago'}</button>
         <button class="btn" id="dEdit">✏️ Editar</button>
+        ${isCustomer ? '<button class="btn" id="dShop">🔗 Link de pedidos</button>' : ''}
         ${isCustomer ? `<a class="btn" download href="/api/price-lists/${listId}/export.pdf?customer_id=${p.id}">🏷️ Lista de precios (PDF)</a>
           <a class="btn" href="/api/price-lists/${listId}/export.xlsx?customer_id=${p.id}">📊 Lista Excel</a>` : ''}
       </div>
@@ -1709,11 +1734,47 @@ function partyViews({ key, endpoint, singular, plural, isCustomer }) {
     const reload = () => renderDetail(view, id);
     $('#dPay').onclick = () => paymentForm(p, reload);
     $('#dEdit').onclick = () => form(p, reload);
+    if (isCustomer) $('#dShop').onclick = () => shopLinkModal(p);
   }
 }
 
 partyViews({ key: 'clientes', endpoint: 'customers', singular: 'Cliente', plural: 'Clientes', isCustomer: true });
 partyViews({ key: 'proveedores', endpoint: 'suppliers', singular: 'Proveedor', plural: 'Proveedores', isCustomer: false });
+
+/** Link personal del cliente a la tienda online (con sus precios y sus datos) */
+async function shopLinkModal(customer, regenerate = false) {
+  const { token } = await api(`/customers/${customer.id}/shop-link`, { method: 'POST', body: { regenerate } });
+  const url = `${location.origin}/tienda?c=${token}`;
+  const phone = String(customer.phone || '').replace(/\D/g, '');
+  const text = `¡Hola ${customer.name}! Te paso el link para ver nuestro catálogo con tus precios y hacer pedidos: ${url}`;
+  modal({
+    title: `Link de pedidos — ${customer.name}`,
+    body: `<p class="muted">Con este link el cliente ve el catálogo con <b>sus precios</b> y sus datos ya cargados. Es personal: no lo compartas con otros.</p>
+      <div style="display:flex;gap:6px"><input id="shopUrl" value="${esc(url)}" readonly style="flex:1"><button class="btn" id="copyUrl">📋 Copiar</button></div>
+      <div class="toolbar" style="margin-top:12px">
+        <a class="btn ok" target="_blank" rel="noopener" href="https://wa.me/${phone}?text=${encodeURIComponent(text)}">Enviar por WhatsApp</a>
+        <a class="btn" target="_blank" href="${esc(url)}">Abrir</a>
+        <button class="btn danger" id="regen" title="El link anterior deja de funcionar">Generar link nuevo</button>
+      </div>${phone ? '' : '<p class="muted">El cliente no tiene teléfono cargado: WhatsApp te va a pedir elegir el contacto.</p>'}`,
+    actions: [{ label: 'Cerrar', cls: 'primary' }],
+    onOpen(el, close) {
+      $('#copyUrl', el).onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+        } catch {
+          $('#shopUrl', el).select();
+          document.execCommand('copy');
+        }
+        toast('Link copiado', 'ok');
+      };
+      $('#regen', el).onclick = safe(async () => {
+        if (!(await confirmDialog('¿Generar un link nuevo? El anterior deja de funcionar.', 'Generar'))) return;
+        close();
+        shopLinkModal(customer, true);
+      });
+    },
+  });
+}
 
 // ---------- Resumen de cuentas corrientes ----------
 views.cuentas = {
@@ -2191,7 +2252,7 @@ views.importar = {
 views.config = {
   title: 'Configuración',
   async render(view) {
-    const s = await api('/settings');
+    const [s, lists] = await Promise.all([api('/settings'), cache.lists()]);
     view.innerHTML = `<div class="card" style="max-width:720px"><h2>Datos del negocio</h2>
       <p class="muted">Aparecen en los comprobantes y en las listas de precios.</p>
       <div class="form-grid" id="cfgForm">
@@ -2214,6 +2275,22 @@ views.config = {
         ${field('Condiciones del presupuesto (aparecen al pie)', `<textarea name="quote_footer" rows="3" placeholder="Ej: Forma de pago: efectivo o transferencia. Entrega en 48 hs.">${esc(s.quote_footer)}</textarea>`, 'full')}
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="cfgSave">Guardar</button></div></div>
+      <div class="card" style="max-width:720px"><h2>🛍️ Tienda online para clientes</h2>
+        <p class="muted">Una página donde tus clientes ven el catálogo y te mandan pedidos por WhatsApp. Los pedidos aparecen en <a href="#/pedidos">Pedidos web</a>.</p>
+        <div class="form-grid" id="shopForm">
+          <label class="check full"><input type="checkbox" name="shop_enabled" ${s.shop_enabled === '1' ? 'checked' : ''}> <b>Tienda activada</b></label>
+          ${field('WhatsApp que recibe los pedidos', `<input name="shop_whatsapp" value="${esc(s.shop_whatsapp || '')}" placeholder="Ej: 5493511234567 (con 549 y sin 0 ni 15)">`)}
+          ${field('Precios que ve el público', `<select name="shop_price_list">${opt('', 'Lista predeterminada', s.shop_price_list || '')}${lists.map((l) => opt(l.id, 'Lista ' + l.name, s.shop_price_list || '')).join('')}${opt('none', 'No mostrar precios', s.shop_price_list || '')}</select>`)}
+          ${field('Stock', `<select name="shop_stock_mode">${opt('disponible', 'Mostrar "Disponible / Últimas unidades / Sin stock"', s.shop_stock_mode || 'disponible')}${opt('exacto', 'Mostrar la cantidad exacta', s.shop_stock_mode || 'disponible')}</select>`)}
+          ${field('Pedido mínimo ($, 0 = sin mínimo)', `<input name="shop_min_order" inputmode="decimal" value="${esc(s.shop_min_order || '')}">`)}
+          <label class="check full"><input type="checkbox" name="shop_hide_out_of_stock" ${s.shop_hide_out_of_stock === '1' ? 'checked' : ''}> Ocultar productos sin stock</label>
+          <label class="check full"><input type="checkbox" name="shop_private" ${s.shop_private === '1' ? 'checked' : ''}> Solo para clientes con link personal (el link general no muestra nada)</label>
+          ${field('Mensaje para los clientes (opcional)', `<textarea name="shop_message" rows="2" placeholder="Ej: Entregas de lunes a sábado. Pedidos antes de las 18 hs salen al día siguiente.">${esc(s.shop_message || '')}</textarea>`, 'full')}
+        </div>
+        <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="shopSave">Guardar tienda</button>
+          <span class="spacer"></span><input id="shopPublicUrl" readonly value="${esc(location.origin + '/tienda')}" style="min-width:220px"><button class="btn" id="shopCopy">📋 Copiar link</button><a class="btn" href="/tienda" target="_blank">Abrir</a></div>
+        <p class="muted" style="margin-bottom:0">Los <b>precios mayoristas</b> conviene darlos con el link personal de cada cliente: entrá al cliente y tocá <b>🔗 Link de pedidos</b>. Ese link muestra la lista de precios asignada a ese cliente.</p>
+      </div>
       <div class="card" style="max-width:720px"><h2>🖼️ Logo</h2>
         <p class="muted">Aparece en el menú, en la pantalla de ingreso, en presupuestos, comprobantes y listas de precios. PNG o JPG. Si no subís ninguno, se usa el logo de ETL Bebidas.</p>
         <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
@@ -2282,6 +2359,23 @@ views.config = {
         $('#restoreGo').disabled = false;
       }
     });
+    $('#shopSave').onclick = safe(async () => {
+      const f = formData($('#shopForm'));
+      for (const k of ['shop_enabled', 'shop_hide_out_of_stock', 'shop_private']) f[k] = f[k] ? '1' : '0';
+      f.shop_whatsapp = String(f.shop_whatsapp || '').replace(/\D/g, '');
+      f.shop_min_order = String(num(f.shop_min_order) || '');
+      await api('/settings', { method: 'PUT', body: f });
+      toast(f.shop_enabled === '1' ? 'Tienda guardada y activada' : 'Tienda guardada (desactivada)', 'ok');
+    });
+    $('#shopCopy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText($('#shopPublicUrl').value);
+      } catch {
+        $('#shopPublicUrl').select();
+        document.execCommand('copy');
+      }
+      toast('Link copiado', 'ok');
+    };
     $('#logoFile').onchange = safe(async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -2394,8 +2488,10 @@ async function boot() {
   $('#userName').textContent = status.user.username;
   loadBrand();
   refreshTopBalances();
+  refreshPendingOrders();
   if (!session.started) {
     session.started = true;
+    setInterval(() => session.user && refreshPendingOrders(), 60000);
     window.addEventListener('hashchange', route);
   }
   route();

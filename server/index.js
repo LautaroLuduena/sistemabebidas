@@ -12,6 +12,7 @@ const files = require('./routes/files');
 const auth = require('./auth');
 const backup = require('./routes/backup');
 const history = require('./routes/history');
+const { publicShop, shopAdmin } = require('./routes/shop');
 
 function createApp() {
   const app = express();
@@ -23,16 +24,20 @@ function createApp() {
   });
   // no-cache: el navegador revalida en cada carga, así siempre toma la última versión después de actualizar
   app.use(express.static(path.join(__dirname, '..', 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
+  // Tienda online pública para clientes
+  app.get('/tienda', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'tienda.html')));
   app.use('/uploads', auth.requireAuth, express.static(UPLOADS_DIR, { maxAge: '7d' }));
 
   const api = express.Router();
   api.get('/health', (req, res) => res.json({ ok: true }));
   api.use(auth.router); // login / setup (sin sesión)
   api.use(reports.publicRouter); // nombre y logo del negocio (sin sesión)
+  api.use('/shop', publicShop); // catálogo y pedidos de la tienda online (sin sesión)
   api.use(auth.requireAuth);
   api.use('/users', auth.users);
   api.use(backup);
   api.use(history);
+  api.use(shopAdmin);
   api.use(files); // primero, para que /products/export.xlsx no choque con /products/:id
   api.use(catalog);
   api.use('/customers', customers);

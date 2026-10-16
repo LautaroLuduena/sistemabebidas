@@ -195,6 +195,10 @@ quotes.get('/', (req, res) => {
     where.push('q.status = ?');
     params.push(req.query.status);
   }
+  if (req.query.source) {
+    where.push('q.source = ?');
+    params.push(req.query.source);
+  }
   const rows = db
     .prepare(
       `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, pl.name price_list_name,
@@ -209,8 +213,8 @@ quotes.get('/', (req, res) => {
 function getQuote(id) {
   const q = db
     .prepare(
-      `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, c.tax_id customer_tax_id, c.address customer_address,
-              c.phone customer_phone, pl.name price_list_name
+      `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, c.tax_id customer_tax_id,
+              COALESCE(q.contact_address, c.address) customer_address, COALESCE(q.contact_phone, c.phone) customer_phone, pl.name price_list_name
        FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id LEFT JOIN price_lists pl ON pl.id = q.price_list_id
        WHERE q.id = ?`
     )

@@ -227,6 +227,17 @@ db.prepare(
   "UPDATE settings SET value = 'ETL Bebidas' WHERE key = 'business_name' AND value IN ('Mi Distribuidora de Bebidas', 'Distrimax')"
 ).run();
 
+// Migraciones de columnas agregadas después (bases ya existentes)
+function addColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+addColumn('quotes', 'source', "TEXT NOT NULL DEFAULT 'interno'"); // interno | web (pedido desde la tienda online)
+addColumn('quotes', 'contact_phone', 'TEXT');
+addColumn('quotes', 'contact_address', 'TEXT');
+addColumn('customers', 'shop_token', 'TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_shop_token ON customers(shop_token)');
+
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 module.exports = { db, round2, DATA_DIR, UPLOADS_DIR };

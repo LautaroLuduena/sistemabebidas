@@ -863,6 +863,407 @@ views.remitos = {
   },
 };
 
+// ---------- Gráfico de barras (SVG, sin librerías) ----------
+const MONTHS_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const monthLabel = (ym, long) => {
+  const [y, m] = ym.split('-').map(Number);
+  const names = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  return long ? `${names[m - 1]} ${y}` : `${MONTHS_ES[m - 1]} ${String(y).slice(2)}`;
+};
+const shortMoney = (n) => {
+  const a = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toLocaleString('es-AR', { maximumFractionDigits: 1 })}M`;
+  if (a >= 1e3) return `${sign}$${Math.round(a / 1e3).toLocaleString('es-AR')}k`;
+  return `${sign}$${Math.round(a)}`;
+};
+
+/**
+ * Barras agrupadas por categoría (mes). series: [{ name, color, values[] }]. Valores negativos van bajo la línea base.
+ * Tooltip por grupo al pasar el mouse o con foco de teclado.
+ */
+function barChart(el, { categories, series, height = 240 }) {
+  const width = Math.max(320, el.clientWidth || 600);
+  const pad = { top: 12, right: 8, bottom: 26, left: 52 };
+  const all = series.flatMap((s) => s.values);
+  const max = Math.max(0, ...all);
+  const min = Math.min(0, ...all);
+  const span = max - min || 1;
+  const step = (() => {
+    const raw = span / 4;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((v) => v >= raw);
+  })();
+  const top = Math.ceil(max / step) * step;
+  const bottom = Math.floor(min / step) * step;
+  const plotH = height - pad.top - pad.bottom;
+  const y = (v) => pad.top + ((top - v) / (top - bottom || 1)) * plotH;
+  const groupW = (width - pad.left - pad.right) / categories.length;
+  const gap = 2;
+  const barW = Math.max(3, Math.min(28, (groupW * 0.7 - gap * (series.length - 1)) / series.length));
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('role', 'img');
+  const add = (tag, attrs, parent = svg) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  };
+  for (let v = bottom; v <= top + 1e-9; v += step) {
+    add('line', { x1: pad.left, x2: width - pad.right, y1: y(v), y2: y(v), stroke: v === 0 ? '#9aa3b2' : '#e8ebf1', 'stroke-width': 1 });
+    const t = add('text', { x: pad.left - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#6b7385' });
+    t.textContent = shortMoney(v);
+  }
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  tip.hidden = true;
+  categories.forEach((c, i) => {
+    const gx = pad.left + i * groupW;
+    const totalW = series.length * barW + (series.length - 1) * gap;
+    const g = add('g', { tabindex: 0, class: 'chart-group' });
+    add('rect', { x: gx, y: pad.top, width: groupW, height: plotH, fill: 'transparent', class: 'chart-hit' }, g);
+    series.forEach((s, k) => {
+      const v = s.values[i] || 0;
+      const x = gx + (groupW - totalW) / 2 + k * (barW + gap);
+      const y0 = y(Math.max(v, 0));
+      const h = Math.max(v === 0 ? 0 : 1, Math.abs(y(v) - y(0)));
+      add('rect', { x, y: v >= 0 ? y0 : y(0), width: barW, height: h, rx: Math.min(4, barW / 2), fill: s.color }, g);
+    });
+    const t = add('text', { x: gx + groupW / 2, y: height - 8, 'text-anchor': 'middle', 'font-size': 11, fill: '#6b7385' });
+    t.textContent = c.label;
+    const show = () => {
+      tip.replaceChildren();
+      const h = document.createElement('div');
+      h.className = 'chart-tip-title';
+      h.textContent = c.title || c.label;
+      tip.appendChild(h);
+      series.forEach((s) => {
+        const row = document.createElement('div');
+        row.className = 'chart-tip-row';
+        const key = document.createElement('span');
+        key.className = 'chart-key';
+        key.style.background = s.color;
+        const val = document.createElement('b');
+        val.textContent = money(s.values[i] || 0);
+        const name = document.createElement('span');
+        name.className = 'muted';
+        name.textContent = s.name;
+        row.append(key, val, name);
+        tip.appendChild(row);
+      });
+      tip.hidden = false;
+      const left = Math.min(Math.max(0, ((gx + groupW / 2) / width) * el.clientWidth - 80), el.clientWidth - 170);
+      tip.style.left = left + 'px';
+      tip.style.top = '4px';
+    };
+    g.addEventListener('pointerenter', show);
+    g.addEventListener('focus', show);
+    g.addEventListener('pointerleave', () => (tip.hidden = true));
+    g.addEventListener('blur', () => (tip.hidden = true));
+  });
+  el.replaceChildren(svg, tip);
+  el.classList.add('chart');
+  if (series.length > 1) {
+    const legend = document.createElement('div');
+    legend.className = 'chart-legend';
+    series.forEach((s) => {
+      const item = document.createElement('span');
+      const key = document.createElement('span');
+      key.className = 'chart-key';
+      key.style.background = s.color;
+      item.append(key, document.createTextNode(s.name));
+      legend.appendChild(item);
+    });
+    el.prepend(legend);
+  }
+}
+
+const CHART = { ventas: '#2f63c9', compras: '#d26600' };
+const ymOf = (d) => d.toLocaleDateString('sv-SE').slice(0, 7);
+const lastDay = (ym) => {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m, 0).toLocaleDateString('sv-SE');
+};
+const pct = (a, b) => (b ? Math.round(((a - b) / Math.abs(b)) * 100) : null);
+const delta = (a, b) => {
+  const p = pct(a, b);
+  if (p === null) return '';
+  return `<span class="${p >= 0 ? 'pos' : 'neg'}" style="font-size:12px">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}%</span>`;
+};
+
+// ---------- Reportes: mes a mes y detalle de período ----------
+views.reportes = {
+  title: 'Reportes',
+  async render(view) {
+    const now = new Date();
+    const st = (views.reportes.state ||= {
+      from: ymOf(new Date(now.getFullYear(), now.getMonth() - 11, 1)),
+      to: ymOf(now),
+      pFrom: monthStart(),
+      pTo: today(),
+      tab: 'products',
+    });
+    view.innerHTML = `
+      <div class="toolbar">
+        <label class="muted">Desde</label><input type="month" id="mFrom" value="${st.from}">
+        <label class="muted">Hasta</label><input type="month" id="mTo" value="${st.to}">
+        <button class="btn sm" data-range="12">Últimos 12 meses</button>
+        <button class="btn sm" data-range="year">Este año</button>
+        <button class="btn sm" data-range="lastyear">Año anterior</button>
+        <span class="spacer"></span>
+        <a class="btn" id="mXlsx">📊 Excel</a>
+      </div>
+      <div class="grid cols-4" id="mStats"></div>
+      <div class="grid cols-2" style="margin-top:16px">
+        <div class="card"><h2>Ventas y compras por mes</h2><div id="chartSales"></div></div>
+        <div class="card"><h2>Ganancia neta por mes</h2><p class="muted" style="margin:-6px 0 6px;font-size:12px">Ventas − costo de lo vendido − gastos</p><div id="chartProfit"></div></div>
+      </div>
+      <div class="card" style="padding:0"><h2 style="padding:16px 16px 0">Comparativo mes a mes <span class="muted" style="font-weight:400;font-size:12px">— tocá un mes para ver el detalle</span></h2>
+        <div class="table-wrap"><table class="table"><thead><tr>
+          <th>Mes</th><th class="n">Ventas</th><th class="n">vs mes ant.</th><th class="n">Cant.</th><th class="n">Ticket prom.</th><th class="n">Costo vendido</th>
+          <th class="n">Ganancia bruta</th><th class="n">Margen</th><th class="n">Gastos</th><th class="n">Ganancia neta</th><th class="n">Compras</th></tr></thead>
+          <tbody id="mBody"></tbody><tfoot id="mFoot"></tfoot></table></div></div>
+      <div class="card" id="periodCard">
+        <h2>🔎 Detalle del período</h2>
+        <div class="toolbar">
+          <input type="date" id="pFrom" value="${st.pFrom}"> <input type="date" id="pTo" value="${st.pTo}">
+          <span class="spacer"></span><a class="btn sm" id="pHistory">Ver operaciones en el Historial →</a>
+        </div>
+        <div class="grid cols-4" id="pStats"></div>
+        <div class="tabs" id="pTabs" style="margin-top:12px">
+          ${[['products', 'Productos vendidos'], ['categories', 'Por categoría'], ['customers', 'Clientes'], ['suppliers', 'Compras por proveedor'], ['purchased', 'Productos comprados'], ['expenses', 'Gastos']]
+            .map(([k, l]) => `<button data-tab="${k}" class="${st.tab === k ? 'active' : ''}">${l}</button>`)
+            .join('')}
+        </div>
+        <div class="table-wrap" id="pBody"></div>
+      </div>`;
+
+    let months = [];
+    const loadMonthly = safe(async () => {
+      const d = await api(`/reports/monthly?from_month=${st.from}&to_month=${st.to}`);
+      months = d.months;
+      $('#mXlsx').href = `/api/reports/monthly.xlsx?from_month=${st.from}&to_month=${st.to}`;
+      const sum = (k) => months.reduce((a, m) => a + m[k], 0);
+      const ventas = sum('ventas');
+      const bruta = sum('ganancia_bruta');
+      $('#mStats').innerHTML = `
+        <div class="stat"><div class="label">Ventas del período</div><div class="value">${money(ventas)}</div><div class="sub">${sum('ventas_count')} ventas · ${qty(sum('unidades'))} unidades</div></div>
+        <div class="stat ok"><div class="label">Ganancia bruta</div><div class="value">${money(bruta)}</div><div class="sub">Margen ${ventas ? Math.round((bruta / ventas) * 100) : 0}%</div></div>
+        <div class="stat ${sum('ganancia_neta') < 0 ? 'danger' : 'ok'}"><div class="label">Ganancia neta</div><div class="value">${money(sum('ganancia_neta'))}</div><div class="sub">Gastos: ${money(sum('gastos'))}</div></div>
+        <div class="stat"><div class="label">Compras del período</div><div class="value">${money(sum('compras'))}</div><div class="sub">${sum('compras_count')} compras</div></div>`;
+      const cats = months.map((m) => ({ label: monthLabel(m.month), title: monthLabel(m.month, true) }));
+      barChart($('#chartSales'), {
+        categories: cats,
+        series: [
+          { name: 'Ventas', color: CHART.ventas, values: months.map((m) => m.ventas) },
+          { name: 'Compras', color: CHART.compras, values: months.map((m) => m.compras) },
+        ],
+      });
+      barChart($('#chartProfit'), { categories: cats, series: [{ name: 'Ganancia neta', color: CHART.ventas, values: months.map((m) => m.ganancia_neta) }] });
+      $('#mBody').innerHTML = months
+        .map(
+          (m, i) => `<tr data-month="${m.month}" style="cursor:pointer"><td><b>${monthLabel(m.month, true)}</b></td>
+          <td class="n"><b>${money(m.ventas)}</b></td><td class="n">${i ? delta(m.ventas, months[i - 1].ventas) : ''}</td><td class="n">${m.ventas_count}</td>
+          <td class="n">${money(m.ticket_promedio)}</td><td class="n">${money(m.costo)}</td><td class="n">${money(m.ganancia_bruta)}</td>
+          <td class="n">${m.margen}%</td><td class="n">${money(m.gastos)}</td><td class="n"><b class="${m.ganancia_neta < 0 ? 'neg' : ''}">${money(m.ganancia_neta)}</b></td>
+          <td class="n">${money(m.compras)}</td></tr>`
+        )
+        .reverse()
+        .join('');
+      $('#mFoot').innerHTML = `<tr style="font-weight:700"><td>Total</td><td class="n">${money(ventas)}</td><td></td><td class="n">${sum('ventas_count')}</td><td></td>
+        <td class="n">${money(sum('costo'))}</td><td class="n">${money(bruta)}</td><td class="n">${ventas ? Math.round((bruta / ventas) * 100) : 0}%</td>
+        <td class="n">${money(sum('gastos'))}</td><td class="n">${money(sum('ganancia_neta'))}</td><td class="n">${money(sum('compras'))}</td></tr>`;
+    });
+
+    const TABLES = {
+      products: { cols: [['Producto', 'name'], ['Categoría', 'category'], ['Cantidad', 'qty', 'q'], ['Vendido', 'total', '$'], ['Costo', 'cost', '$'], ['Ganancia', 'profit', '$']] },
+      categories: { cols: [['Categoría', 'name'], ['Unidades', 'qty', 'q'], ['Vendido', 'total', '$'], ['Ganancia', 'profit', '$']] },
+      customers: { cols: [['Cliente', 'name'], ['Ventas', 'n', 'q'], ['Total', 'total', '$'], ['Ganancia', 'profit', '$']] },
+      suppliers: { cols: [['Proveedor', 'name'], ['Compras', 'n', 'q'], ['Total', 'total', '$']] },
+      purchased: { cols: [['Producto', 'name'], ['Cantidad', 'qty', 'q'], ['Costo promedio', 'avg_cost', '$'], ['Total', 'total', '$']] },
+      expenses: { cols: [['Concepto', 'name'], ['Veces', 'n', 'q'], ['Total', 'total', '$']] },
+    };
+    let detail = null;
+    const renderTab = () => {
+      const t = TABLES[st.tab];
+      const rows = detail[st.tab];
+      $$('#pTabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === st.tab));
+      const cell = (r, [, k, f]) => `<td class="${f ? 'n' : ''}">${f === '$' ? money(r[k]) : f === 'q' ? qty(r[k] || 0) : esc(r[k] || '')}</td>`;
+      $('#pBody').innerHTML = rows.length
+        ? `<table class="table"><thead><tr>${t.cols.map(([l, , f]) => `<th class="${f ? 'n' : ''}">${l}</th>`).join('')}</tr></thead>
+          <tbody>${rows.map((r) => `<tr>${t.cols.map((c) => cell(r, c)).join('')}</tr>`).join('')}</tbody></table>`
+        : '<div class="empty">Sin datos en este período</div>';
+    };
+    const loadPeriod = safe(async () => {
+      detail = await api(`/reports/period?from=${st.pFrom}&to=${st.pTo}`);
+      const sumOf = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+      const ventas = sumOf(detail.customers, 'total');
+      const ganancia = sumOf(detail.customers, 'profit');
+      const gastos = sumOf(detail.expenses, 'total');
+      $('#pStats').innerHTML = `
+        <div class="stat"><div class="label">Vendido</div><div class="value">${money(ventas)}</div><div class="sub">${sumOf(detail.customers, 'n')} ventas</div></div>
+        <div class="stat ok"><div class="label">Ganancia bruta</div><div class="value">${money(ganancia)}</div></div>
+        <div class="stat"><div class="label">Gastos</div><div class="value">${money(gastos)}</div></div>
+        <div class="stat"><div class="label">Comprado</div><div class="value">${money(sumOf(detail.suppliers, 'total'))}</div><div class="sub">${sumOf(detail.suppliers, 'n')} compras</div></div>`;
+      $('#pHistory').href = `#/historial?from=${st.pFrom}&to=${st.pTo}`;
+      renderTab();
+    });
+
+    $('#mFrom').onchange = (e) => { st.from = e.target.value; loadMonthly(); };
+    $('#mTo').onchange = (e) => { st.to = e.target.value; loadMonthly(); };
+    $$('[data-range]', view).forEach(
+      (b) =>
+        (b.onclick = () => {
+          const y = now.getFullYear();
+          if (b.dataset.range === '12') [st.from, st.to] = [ymOf(new Date(y, now.getMonth() - 11, 1)), ymOf(now)];
+          if (b.dataset.range === 'year') [st.from, st.to] = [`${y}-01`, ymOf(now)];
+          if (b.dataset.range === 'lastyear') [st.from, st.to] = [`${y - 1}-01`, `${y - 1}-12`];
+          $('#mFrom').value = st.from;
+          $('#mTo').value = st.to;
+          loadMonthly();
+        })
+    );
+    $('#mBody').onclick = (e) => {
+      const tr = e.target.closest('[data-month]');
+      if (!tr) return;
+      st.pFrom = tr.dataset.month + '-01';
+      st.pTo = lastDay(tr.dataset.month);
+      $('#pFrom').value = st.pFrom;
+      $('#pTo').value = st.pTo;
+      loadPeriod();
+      $('#periodCard').scrollIntoView({ behavior: 'smooth' });
+    };
+    $('#pFrom').onchange = (e) => { st.pFrom = e.target.value; loadPeriod(); };
+    $('#pTo').onchange = (e) => { st.pTo = e.target.value; loadPeriod(); };
+    $('#pTabs').onclick = (e) => {
+      if (!e.target.dataset.tab) return;
+      st.tab = e.target.dataset.tab;
+      renderTab();
+    };
+    await Promise.all([loadMonthly(), loadPeriod()]);
+  },
+};
+
+// ---------- Historial de operaciones ----------
+const KIND_INFO = {
+  venta: ['Venta', 'ok'],
+  compra: ['Compra', 'warn'],
+  cobro: ['Cobro', 'ok'],
+  pago: ['Pago a proveedor', 'warn'],
+  gasto: ['Gasto', 'danger'],
+  ingreso: ['Ingreso', 'ok'],
+  traspaso: ['Traspaso', ''],
+  presupuesto: ['Presupuesto', 'info'],
+  remito: ['Remito', 'info'],
+  ajuste_stock: ['Ajuste stock', ''],
+  ajuste_cc: ['Ajuste CC', ''],
+};
+
+views.historial = {
+  title: 'Historial de operaciones',
+  async render(view) {
+    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
+    const [customers, suppliers] = await Promise.all([api('/customers?include_inactive=1'), api('/suppliers?include_inactive=1')]);
+    const st = {
+      from: qs.get('from') || monthStart(),
+      to: qs.get('to') || today(),
+      kind: qs.get('kind') || '',
+      customer_id: qs.get('customer_id') || '',
+      supplier_id: qs.get('supplier_id') || '',
+      status: 'activas',
+      q: '',
+    };
+    view.innerHTML = `
+      <div class="card">
+        <div class="toolbar" style="margin-bottom:8px">
+          <label class="muted">Mes</label><input type="month" id="hMonth" value="${st.from.slice(0, 7)}">
+          <label class="muted">o desde</label><input type="date" id="hFrom" value="${st.from}"><label class="muted">hasta</label><input type="date" id="hTo" value="${st.to}">
+          <button class="btn sm" data-quick="hoy">Hoy</button><button class="btn sm" data-quick="mes">Este mes</button>
+          <button class="btn sm" data-quick="ant">Mes anterior</button><button class="btn sm" data-quick="anio">Este año</button>
+        </div>
+        <div class="toolbar" style="margin:0">
+          <select id="hKind"><option value="">Todas las operaciones</option>
+            ${Object.entries(KIND_INFO).map(([k, [l]]) => opt(k, l, st.kind)).join('')}
+            <option value="venta,cobro,ingreso" ${st.kind === 'venta,cobro,ingreso' ? 'selected' : ''}>Todo lo que entra</option>
+            <option value="compra,pago,gasto" ${st.kind === 'compra,pago,gasto' ? 'selected' : ''}>Todo lo que sale</option></select>
+          <select id="hCustomer"><option value="">Cualquier cliente</option>${customers.map((c) => opt(c.id, c.name, st.customer_id)).join('')}</select>
+          <select id="hSupplier"><option value="">Cualquier proveedor</option>${suppliers.map((c) => opt(c.id, c.name, st.supplier_id)).join('')}</select>
+          <select id="hStatus"><option value="activas">Sin anuladas</option><option value="anuladas">Solo anuladas</option><option value="">Todas</option></select>
+          <input id="hQ" placeholder="Buscar texto (concepto, factura, nombre)" style="min-width:220px">
+          <span class="spacer"></span><a class="btn" id="hXlsx">📊 Excel</a>
+        </div>
+      </div>
+      <div class="grid cols-4" id="hStats"></div>
+      <div class="card" style="padding:0;margin-top:16px"><div class="table-wrap"><table class="table">
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Operación</th><th>Cliente / Proveedor</th><th class="n">Importe</th><th>Caja</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="hBody"></tbody></table></div></div>
+      <p class="muted" id="hNote"></p>`;
+
+    const docLink = (r) => {
+      if (r.kind === 'venta') return `<a class="btn sm" href="/api/sales/${r.id}/pdf" download>PDF</a>`;
+      if (r.kind === 'presupuesto') return `<a class="btn sm" href="/api/quotes/${r.id}/pdf" download>PDF</a>`;
+      if (r.kind === 'remito') return `<a class="btn sm" href="/api/remitos/${r.id}/pdf" download>PDF</a>`;
+      return '';
+    };
+    const load = safe(async () => {
+      const params = new URLSearchParams({ from: st.from, to: st.to, kind: st.kind, customer_id: st.customer_id, supplier_id: st.supplier_id, status: st.status, q: st.q });
+      $('#hXlsx').href = '/api/history.xlsx?' + params;
+      const d = await api('/history?' + params);
+      const S = d.summary;
+      const tile = (k, label, cls = '') =>
+        `<div class="stat ${cls}"><div class="label">${label}</div><div class="value">${money(S[k] ? S[k].total : 0)}</div><div class="sub">${S[k] ? S[k].count : 0} operaciones</div></div>`;
+      $('#hStats').innerHTML = tile('venta', 'Ventas', 'ok') + tile('compra', 'Compras') + tile('cobro', 'Cobros de cuenta corriente') + tile('gasto', 'Gastos', 'danger');
+      const isVoid = (r) => r.status === 'anulada' || r.status === 'anulado';
+      $('#hBody').innerHTML = d.rows.length
+        ? d.rows
+            .map((r) => {
+              const [label, cls] = KIND_INFO[r.kind] || [r.kind, ''];
+              const amount = r.kind === 'ajuste_stock' ? `${r.amount > 0 ? '+' : ''}${qty(r.amount)} u.` : money(r.amount);
+              return `<tr style="${isVoid(r) ? 'opacity:.55' : ''}"><td style="white-space:nowrap">${esc(r.date)}</td><td><span class="badge ${cls}">${label}</span></td>
+                <td>${esc(r.label)}${r.detail ? `<div class="muted" style="font-size:12px">${esc(r.detail)}</div>` : ''}</td><td>${esc(r.party || '')}</td>
+                <td class="n"><b>${amount}</b></td><td>${esc(r.box || '')}</td><td>${isVoid(r) ? '<span class="badge danger">Anulada</span>' : ''}</td>
+                <td class="actions">${docLink(r)}</td></tr>`;
+            })
+            .join('')
+        : '<tr><td colspan="8" class="empty">No hay operaciones con esos filtros</td></tr>';
+      $('#hNote').textContent = d.truncated ? 'Se muestran las primeras 1000 operaciones. Acotá el período o descargá el Excel para ver todo.' : `${d.rows.length} operaciones`;
+    });
+    const setRange = (from, to) => {
+      st.from = from;
+      st.to = to;
+      $('#hFrom').value = from;
+      $('#hTo').value = to;
+      $('#hMonth').value = from.slice(0, 7);
+      load();
+    };
+    $('#hMonth').onchange = (e) => e.target.value && setRange(e.target.value + '-01', lastDay(e.target.value));
+    $('#hFrom').onchange = (e) => { st.from = e.target.value; load(); };
+    $('#hTo').onchange = (e) => { st.to = e.target.value; load(); };
+    $$('[data-quick]', view).forEach(
+      (b) =>
+        (b.onclick = () => {
+          const n = new Date();
+          if (b.dataset.quick === 'hoy') setRange(today(), today());
+          if (b.dataset.quick === 'mes') setRange(monthStart(), today());
+          if (b.dataset.quick === 'ant') {
+            const m = ymOf(new Date(n.getFullYear(), n.getMonth() - 1, 1));
+            setRange(m + '-01', lastDay(m));
+          }
+          if (b.dataset.quick === 'anio') setRange(`${n.getFullYear()}-01-01`, today());
+        })
+    );
+    $('#hKind').onchange = (e) => { st.kind = e.target.value; load(); };
+    $('#hCustomer').onchange = (e) => { st.customer_id = e.target.value; load(); };
+    $('#hSupplier').onchange = (e) => { st.supplier_id = e.target.value; load(); };
+    $('#hStatus').onchange = (e) => { st.status = e.target.value; load(); };
+    $('#hQ').oninput = debounce((e) => { st.q = e.target.value; load(); }, 300);
+    load();
+  },
+};
+
 // ---------- Comprar ----------
 const buy = { items: [], supplier_id: '', invoice_number: '', date: '', paid_cash: '', paid_transfer: '', notes: '', update_cost: true };
 
@@ -1921,7 +2322,7 @@ async function loadBrand() {
 }
 
 async function route() {
-  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   const name = parts[0] || '';
   const v = views[name] || views[''];
   $$('.sidebar nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === name));

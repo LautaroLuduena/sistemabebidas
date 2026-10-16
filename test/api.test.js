@@ -249,3 +249,33 @@ test('remitos X: numeración correlativa, uno por venta, PDF y anulación', asyn
   const list = await call('GET', '/sales');
   assert.equal(list.find((x) => x.id === s1.id).remito_id, again.id);
 });
+
+test('historial y reportes mes a mes', async () => {
+  const d = new Date().toLocaleDateString('sv-SE');
+  const month = d.slice(0, 7);
+  await call('POST', '/cash/movements', { box: 'efectivo', amount: 1000, concept: 'Flete', type: 'egreso' });
+
+  const h = await call('GET', `/history?from=${month}-01&to=${d}`);
+  const kinds = new Set(h.rows.map((r) => r.kind));
+  for (const k of ['venta', 'compra', 'cobro', 'gasto', 'presupuesto', 'remito', 'traspaso']) assert.ok(kinds.has(k), `falta ${k}`);
+  const onlyExpenses = await call('GET', `/history?from=${month}-01&to=${d}&kind=gasto&q=flete`);
+  assert.ok(onlyExpenses.rows.length >= 1 && onlyExpenses.rows.every((r) => r.kind === 'gasto'));
+  const voided = await call('GET', `/history?from=${month}-01&to=${d}&status=anuladas`);
+  assert.ok(voided.rows.every((r) => ['anulada', 'anulado'].includes(r.status)));
+
+  const m = await call('GET', `/reports/monthly?from_month=${month}&to_month=${month}`);
+  assert.equal(m.months.length, 1);
+  const cur = m.months[0];
+  const sales = (await call('GET', `/sales?from=${month}-01&to=${d}&status=ok`)).reduce((a, s) => a + s.total, 0);
+  assert.equal(cur.ventas, Math.round(sales * 100) / 100);
+  assert.equal(cur.ganancia_bruta, Math.round((cur.ventas - cur.costo) * 100) / 100);
+  assert.equal(cur.ganancia_neta, Math.round((cur.ganancia_bruta - cur.gastos) * 100) / 100);
+  assert.ok(cur.gastos >= 1000);
+
+  const p = await call('GET', `/reports/period?from=${month}-01&to=${d}`);
+  assert.ok(p.products.length > 0 && p.expenses.some((e) => e.name === 'Flete'));
+  for (const url of [`/history.xlsx?from=${month}-01`, '/reports/monthly.xlsx']) {
+    const res = await fetch(base + url, { headers: { Cookie: cookie } });
+    assert.equal(res.status, 200, url);
+  }
+});

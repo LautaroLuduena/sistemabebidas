@@ -136,6 +136,20 @@ table.table { width: 100%; border-collapse: collapse; }
 .img-preview { width: 140px; height: 140px; border: 1px dashed var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; background: #fafbfd; overflow: hidden; font-size: 40px; }
 .img-preview img { width: 100%; height: 100%; object-fit: contain; }
 
+/* Gráficos */
+.chart { position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart-group:focus { outline: none; }
+.chart-group:hover .chart-hit, .chart-group:focus .chart-hit { fill: rgba(18, 60, 140, .06); }
+.chart-tip { position: absolute; background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 8px 10px; font-size: 12px; pointer-events: none; min-width: 160px; z-index: 3; }
+.chart-tip-title { font-weight: 600; margin-bottom: 4px; text-transform: capitalize; }
+.chart-tip-row { display: flex; align-items: center; gap: 6px; }
+.chart-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.chart-tip .chart-key { width: 12px; height: 3px; border-radius: 2px; }
+.chart-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+tfoot td { border-top: 2px solid var(--border); }
+
 /* Login */
 .auth-screen { position: fixed; inset: 0; background: var(--sidebar); display: flex; align-items: center; justify-content: center; z-index: 90; padding: 16px; }
 .auth-card { background: var(--panel); border-radius: 14px; padding: 28px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.35); }
@@ -146,7 +160,8 @@ table.table { width: 100%; border-collapse: collapse; }
 .toast.error { background: var(--danger); }
 .toast.ok { background: var(--ok); }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; overflow-x: auto; }
+.tabs button { white-space: nowrap; }
 .tabs button { background: none; border: none; padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; font: inherit; color: var(--muted); }
 .tabs button.active { border-color: var(--primary); color: var(--text); font-weight: 600; }
 

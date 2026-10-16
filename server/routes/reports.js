@@ -21,8 +21,8 @@ router.get('/dashboard', (req, res) => {
     .get();
   const monthProfit = db
     .prepare(
-      `SELECT COALESCE(SUM(i.subtotal - i.quantity * i.unit_cost),0) g FROM sale_items i JOIN sales s ON s.id = i.sale_id
-       WHERE s.status = 'ok' AND strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now','localtime')`
+      `SELECT COALESCE(SUM(s.total - (SELECT COALESCE(SUM(i.quantity * i.unit_cost), 0) FROM sale_items i WHERE i.sale_id = s.id)), 0) g
+       FROM sales s WHERE s.status = 'ok' AND strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now','localtime')`
     )
     .get();
   const receivable = db

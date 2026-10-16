@@ -11,6 +11,7 @@ const reports = require('./routes/reports');
 const files = require('./routes/files');
 const auth = require('./auth');
 const backup = require('./routes/backup');
+const history = require('./routes/history');
 
 function createApp() {
   const app = express();
@@ -31,6 +32,7 @@ function createApp() {
   api.use(auth.requireAuth);
   api.use('/users', auth.users);
   api.use(backup);
+  api.use(history);
   api.use(files); // primero, para que /products/export.xlsx no choque con /products/:id
   api.use(catalog);
   api.use('/customers', customers);

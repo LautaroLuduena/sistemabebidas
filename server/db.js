@@ -186,6 +186,21 @@ CREATE TABLE IF NOT EXISTS quote_items (
   subtotal REAL NOT NULL
 );
 
+-- Remitos X (documento no válido como factura). Se generan a partir de una venta:
+-- el stock ya lo descontó la venta, el remito documenta la entrega.
+CREATE TABLE IF NOT EXISTS remitos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pv INTEGER NOT NULL DEFAULT 1,              -- punto de venta (0001)
+  number INTEGER NOT NULL,                    -- número correlativo dentro del punto de venta
+  date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  sale_id INTEGER NOT NULL REFERENCES sales(id),
+  delivery_address TEXT,
+  notes TEXT,
+  valued INTEGER NOT NULL DEFAULT 1,          -- 1 = muestra precios, 0 = solo cantidades
+  status TEXT NOT NULL DEFAULT 'emitido',     -- emitido | anulado
+  UNIQUE (pv, number)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT

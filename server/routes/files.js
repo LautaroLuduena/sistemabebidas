@@ -5,7 +5,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { db, round2, UPLOADS_DIR } = require('../db');
 const { HttpError, getPriceList, priceFor, getSetting, addStock, logoFile } = require('../services');
-const { getSale, getQuote } = require('./operations');
+const { getSale, getQuote, getRemito } = require('./operations');
 const pdf = require('../pdf');
 
 const router = express.Router();
@@ -521,6 +521,7 @@ router.get('/sales/:id/ticket', (req, res) => {
 });
 
 router.get('/sales/:id/pdf', (req, res) => pdf.salePdf(res, getSale(req.params.id)));
+router.get('/remitos/:id/pdf', (req, res) => pdf.remitoPdf(res, getRemito(req.params.id), { inline: req.query.inline === '1' }));
 
 // ---------------- Presupuesto ----------------
 router.get('/quotes/:id/pdf', (req, res) => pdf.quotePdf(res, getQuote(req.params.id), { photos: req.query.photos === '1' }));

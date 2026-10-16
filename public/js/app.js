@@ -73,7 +73,7 @@ function modal({ title, body, wide = false, actions = [], onOpen }) {
   root.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog">
     <header><h3>${esc(title)}</h3><button class="btn icon" data-close>✕</button></header>
     <div class="content">${body}</div>
-    ${actions.length ? '<footer></footer>' : ''}</div>`;
+    ${actions.some(Boolean) ? '<footer></footer>' : ''}</div>`;
   const close = () => {
     root.remove();
     document.removeEventListener('keydown', onKey);
@@ -85,7 +85,7 @@ function modal({ title, body, wide = false, actions = [], onOpen }) {
   root.addEventListener('mousedown', (e) => e.target === root && close());
   $('[data-close]', root).onclick = close;
   const footer = $('footer', root);
-  actions.forEach((a) => {
+  actions.filter(Boolean).forEach((a) => {
     const b = document.createElement('button');
     b.className = `btn ${a.cls || ''}`;
     b.textContent = a.label;
@@ -539,6 +539,7 @@ views.vender = {
           ${r.change ? `<p class="total-box pos" style="font-size:22px">Vuelto: ${money(r.change)}</p>` : ''}
           ${r.on_account ? `<p>Quedó en cuenta corriente: <b>${money(r.on_account)}</b></p>` : ''}`,
         actions: [
+          { label: '📃 Remito', onClick: () => { remitoForm(r.id); return false; } },
           { label: '⬇️ PDF', onClick: () => { download(`/api/sales/${r.id}/pdf`); return false; } },
           { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/sales/${r.id}/ticket`, '_blank'); return false; } },
           { label: 'Nueva venta', cls: 'primary' },
@@ -728,6 +729,7 @@ views.ventas = {
           <td class="n"><b>${money(s.total)}</b></td><td class="n">${money(s.paid_cash)}</td><td class="n">${money(s.paid_transfer)}</td><td class="n">${money(s.on_account)}</td>
           <td>${s.status === 'ok' ? '<span class="badge ok">OK</span>' : '<span class="badge danger">Anulada</span>'}</td>
           <td class="actions"><button class="btn sm" data-view="${s.id}">Ver</button>
+            ${s.remito_id ? `<a class="btn sm" href="/api/remitos/${s.remito_id}/pdf" download title="Descargar el remito">📃 Remito</a>` : s.status === 'ok' ? `<button class="btn sm" data-remito="${s.id}" title="Emitir remito">📃 Emitir remito</button>` : ''}
             <a class="btn sm" href="/api/sales/${s.id}/pdf" download title="Descargar PDF">⬇️ PDF</a>
             <a class="btn sm" href="/api/sales/${s.id}/ticket" target="_blank" title="Imprimir">🖨️</a>
             ${s.status === 'ok' ? `<button class="btn sm danger" data-cancel="${s.id}">Anular</button>` : ''}</td></tr>`
@@ -755,17 +757,105 @@ views.ventas = {
               <div class="summary-row muted"><span>Cuenta corriente</span><span>${money(s.on_account)}</span></div></div>
             ${s.notes ? `<p><b>Notas:</b> ${esc(s.notes)}</p>` : ''}`,
           actions: [
+            s.remito
+              ? { label: '📃 Remito', onClick: () => { download(`/api/remitos/${s.remito.id}/pdf`); return false; } }
+              : s.status === 'ok' && { label: '📃 Emitir remito', onClick: () => { remitoForm(s.id, load); } },
             { label: '⬇️ PDF', onClick: () => { download(`/api/sales/${s.id}/pdf`); return false; } },
             { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/sales/${s.id}/ticket`, '_blank'); return false; } },
             { label: 'Cerrar', cls: 'primary' },
           ],
         });
       }
+      if (e.target.dataset.remito) remitoForm(e.target.dataset.remito, load);
       const cid = e.target.dataset.cancel;
       if (cid && (await confirmDialog(`¿Anular la venta #${cid}? Se devuelve el stock y se revierten los movimientos de caja y cuenta corriente.`, 'Anular venta'))) {
         await api(`/sales/${cid}/cancel`, { method: 'POST' });
         toast('Venta anulada', 'ok');
         refreshTopBalances();
+        load();
+      }
+    });
+    load();
+  },
+};
+
+// ---------- Remitos X ----------
+/** Emite el remito de una venta y ofrece descargarlo */
+async function remitoForm(saleId, onDone) {
+  const [s, settings] = await Promise.all([api('/sales/' + saleId), api('/settings')]);
+  if (s.remito) {
+    download(`/api/remitos/${s.remito.id}/pdf`);
+    return;
+  }
+  modal({
+    title: `Remito X — Venta #${s.id}`,
+    body: `<p>Cliente: <b>${esc(s.customer_name || 'Consumidor final')}</b> · ${s.items.length} productos · ${money(s.total)}</p>
+      <div class="form-grid">
+        ${field('Dirección de entrega', `<input name="delivery_address" value="${esc(s.customer_address)}" placeholder="Calle, número, localidad">`, 'full')}
+        ${field('Observaciones', '<input name="notes" placeholder="Ej: Entregar por la tarde, transporte, chofer">', 'full')}
+        <label class="check full"><input type="checkbox" name="valued" ${settings.remito_valued !== '0' ? 'checked' : ''}> Mostrar precios en el remito (valorizado)</label>
+      </div>
+      <p class="muted">No vuelve a descontar stock: la venta ya lo descontó. El número se asigna solo.</p>`,
+    actions: [
+      { label: 'Cancelar' },
+      {
+        label: 'Emitir remito',
+        cls: 'primary',
+        onClick: async (el) => {
+          const r = await api('/remitos', { method: 'POST', body: { sale_id: s.id, ...formData(el) } });
+          toast(`Remito ${r.code} emitido`, 'ok');
+          onDone && onDone();
+          modal({
+            title: `Remito ${r.code}`,
+            body: '<p>El remito se emitió correctamente. Descargalo o imprimilo (sale con original y duplicado).</p>',
+            actions: [
+              { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/remitos/${r.id}/pdf?inline=1`, '_blank'); return false; } },
+              { label: '⬇️ Descargar PDF', cls: 'primary', onClick: () => { download(`/api/remitos/${r.id}/pdf`); } },
+            ],
+          });
+        },
+      },
+    ],
+  });
+}
+
+views.remitos = {
+  title: 'Remitos',
+  async render(view) {
+    const customers = await api('/customers?include_inactive=1');
+    view.innerHTML = `
+      <div class="toolbar">
+        <input type="date" id="fFrom" value="${monthStart()}"> <input type="date" id="fTo" value="${today()}">
+        <select id="fCustomer"><option value="">Todos los clientes</option>${customers.map((c) => opt(c.id, c.name)).join('')}</select>
+        <select id="fStatus"><option value="emitido">Emitidos</option><option value="anulado">Anulados</option><option value="">Todos</option></select>
+        <span class="spacer"></span><a class="btn primary" href="#/ventas">📃 Emitir desde una venta</a>
+      </div>
+      <p class="muted" style="margin-top:0">Los remitos X se emiten desde una venta: en <b>Ventas</b> tocá <b>📃 Emitir remito</b>, o hacelo al confirmar la venta. Documento no válido como factura.</p>
+      <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
+        <thead><tr><th>N° remito</th><th>Fecha</th><th>Cliente</th><th>Dirección de entrega</th><th>Venta</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="rBody"></tbody></table></div></div>`;
+    const load = safe(async () => {
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value });
+      const rows = await api('/remitos?' + qs);
+      $('#rBody').innerHTML = rows.length
+        ? rows
+            .map(
+              (r) => `<tr><td><b>${esc(r.code)}</b></td><td>${esc(r.date)}</td><td>${esc(r.customer_name || 'Consumidor final')}</td>
+          <td>${esc(r.delivery_address || '')}</td><td>#${r.sale_id}</td><td class="n">${r.valued ? money(r.total) : '<span class="muted">sin precios</span>'}</td>
+          <td>${r.status === 'emitido' ? '<span class="badge ok">Emitido</span>' : '<span class="badge danger">Anulado</span>'}</td>
+          <td class="actions"><a class="btn sm" href="/api/remitos/${r.id}/pdf" download>⬇️ PDF</a>
+            <a class="btn sm" href="/api/remitos/${r.id}/pdf?inline=1" target="_blank" title="Imprimir">🖨️</a>
+            ${r.status === 'emitido' ? `<button class="btn sm danger" data-cancel="${r.id}">Anular</button>` : ''}</td></tr>`
+            )
+            .join('')
+        : '<tr><td colspan="8" class="empty">No hay remitos con esos filtros</td></tr>';
+    });
+    ['#fFrom', '#fTo', '#fCustomer', '#fStatus'].forEach((s) => ($(s).onchange = load));
+    $('#rBody').onclick = safe(async (e) => {
+      const id = e.target.dataset.cancel;
+      if (id && (await confirmDialog('¿Anular este remito? La venta no se modifica; después podés emitir uno nuevo desde la venta.', 'Anular remito'))) {
+        await api(`/remitos/${id}/cancel`, { method: 'POST' });
+        toast('Remito anulado', 'ok');
         load();
       }
     });
@@ -1708,7 +1798,17 @@ views.config = {
         ${field('Dirección', `<input name="business_address" value="${esc(s.business_address)}">`)}
         ${field('Teléfono / WhatsApp', `<input name="business_phone" value="${esc(s.business_phone)}">`)}
         ${field('CUIT', `<input name="business_tax_id" value="${esc(s.business_tax_id)}">`)}
+        ${field('Condición frente al IVA', `<input name="business_iva" value="${esc(s.business_iva)}" placeholder="Ej: Monotributo">`)}
+        ${field('Ingresos Brutos', `<input name="business_iibb" value="${esc(s.business_iibb)}">`)}
+        ${field('Inicio de actividades', `<input name="business_start" value="${esc(s.business_start)}" placeholder="dd/mm/aaaa">`)}
         ${field('Pie de la lista de precios', `<input name="price_list_footer" value="${esc(s.price_list_footer)}" placeholder="Ej: Precios sujetos a cambio sin previo aviso">`, 'full')}
+        <h3 class="full" style="font-size:14px;margin:8px 0 0">📃 Remitos X</h3>
+        ${field('Punto de venta', `<input name="remito_pv" inputmode="numeric" value="${esc(s.remito_pv || 1)}">`)}
+        ${field('Próximo número de remito', `<input name="remito_next" inputmode="numeric" value="${esc(s.remito_next || 1)}" title="Si ya usabas remitos en papel, poné el número con el que querés seguir">`)}
+        ${field('Copias por remito', `<select name="remito_copies">${[1, 2, 3].map((n) => opt(n, n === 1 ? 'Solo original' : n === 2 ? 'Original y duplicado' : 'Original, duplicado y triplicado', s.remito_copies || 2)).join('')}</select>`)}
+        ${field('Precios en el remito', `<select name="remito_valued">${opt('1', 'Valorizado (con precios)', s.remito_valued || '1')}${opt('0', 'Solo cantidades', s.remito_valued || '1')}</select>`)}
+        ${field('Leyenda al pie del remito', `<input name="remito_footer" value="${esc(s.remito_footer)}" placeholder="Ej: La mercadería viaja por cuenta y riesgo del comprador">`, 'full')}
+        <h3 class="full" style="font-size:14px;margin:8px 0 0">📄 Presupuestos</h3>
         ${field('Validez de los presupuestos (días)', `<input name="quote_valid_days" inputmode="numeric" value="${esc(s.quote_valid_days || 7)}">`)}
         ${field('Condiciones del presupuesto (aparecen al pie)', `<textarea name="quote_footer" rows="3" placeholder="Ej: Forma de pago: efectivo o transferencia. Entrega en 48 hs.">${esc(s.quote_footer)}</textarea>`, 'full')}
       </div>

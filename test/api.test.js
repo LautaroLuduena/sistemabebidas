@@ -223,3 +223,29 @@ test('PDF reales de presupuesto, venta y lista de precios', async () => {
   }
   assert.equal((await call('GET', '/branding')).business_name, 'ETL Bebidas');
 });
+
+test('remitos X: numeración correlativa, uno por venta, PDF y anulación', async () => {
+  const beer = await call('GET', '/products/barcode/111');
+  await call('PUT', '/settings', { remito_pv: 2, remito_next: 150 });
+  const s1 = await call('POST', '/sales', { items: [{ product_id: beer.id, quantity: 2 }], paid_cash: 99999 });
+  const stockAfterSale = (await call('GET', `/products/${beer.id}`)).stock;
+  const r1 = await call('POST', '/remitos', { sale_id: s1.id, delivery_address: 'San Martín 100', valued: false });
+  assert.equal(r1.code, '0002-00000150');
+  assert.equal((await call('GET', `/products/${beer.id}`)).stock, stockAfterSale); // no mueve stock
+  await assert.rejects(call('POST', '/remitos', { sale_id: s1.id }), /ya tiene el remito/);
+  const s2 = await call('POST', '/sales', { items: [{ product_id: beer.id, quantity: 1 }], paid_cash: 99999 });
+  const r2 = await call('POST', '/remitos', { sale_id: s2.id });
+  assert.equal(r2.code, '0002-00000151');
+  assert.equal((await call('GET', `/remitos/${r1.id}`)).valued, 0);
+  const res = await fetch(`${base}/remitos/${r1.id}/pdf`, { headers: { Cookie: cookie } });
+  assert.equal(res.headers.get('content-type'), 'application/pdf');
+  assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
+  // Anular la venta anula su remito; luego se puede emitir uno nuevo en otra venta
+  await call('POST', `/sales/${s2.id}/cancel`);
+  assert.equal((await call('GET', `/remitos/${r2.id}`)).status, 'anulado');
+  await call('POST', `/remitos/${r1.id}/cancel`);
+  const again = await call('POST', '/remitos', { sale_id: s1.id });
+  assert.equal(again.code, '0002-00000152');
+  const list = await call('GET', '/sales');
+  assert.equal(list.find((x) => x.id === s1.id).remito_id, again.id);
+});

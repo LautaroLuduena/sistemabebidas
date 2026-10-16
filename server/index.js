@@ -5,7 +5,7 @@ const { UPLOADS_DIR } = require('./db');
 const { HttpError } = require('./services');
 const catalog = require('./routes/catalog');
 const { customers, suppliers } = require('./routes/parties');
-const { sales, purchases, quotes } = require('./routes/operations');
+const { sales, purchases, quotes, remitos } = require('./routes/operations');
 const cash = require('./routes/cash');
 const reports = require('./routes/reports');
 const files = require('./routes/files');
@@ -37,6 +37,7 @@ function createApp() {
   api.use('/suppliers', suppliers);
   api.use('/sales', sales);
   api.use('/quotes', quotes);
+  api.use('/remitos', remitos);
   api.use('/purchases', purchases);
   api.use('/cash', cash);
   api.use(reports);

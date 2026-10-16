@@ -55,7 +55,8 @@ sales.get('/', (req, res) => {
   const rows = db
     .prepare(
       `SELECT s.*, c.name customer_name, pl.name price_list_name,
-              (SELECT COUNT(*) FROM sale_items i WHERE i.sale_id = s.id) items
+              (SELECT COUNT(*) FROM sale_items i WHERE i.sale_id = s.id) items,
+              (SELECT r.id FROM remitos r WHERE r.sale_id = s.id AND r.status = 'emitido' ORDER BY r.id DESC LIMIT 1) remito_id
        FROM sales s LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN price_lists pl ON pl.id = s.price_list_id
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY s.id DESC LIMIT ?`
     )
@@ -74,9 +75,10 @@ function getSale(id) {
   if (!sale) throw new HttpError(404, 'Venta no encontrada');
   sale.items = db
     .prepare(
-      `SELECT i.*, p.code, p.barcode FROM sale_items i LEFT JOIN products p ON p.id = i.product_id WHERE i.sale_id = ? ORDER BY i.id`
+      `SELECT i.*, p.code, p.barcode, p.units_per_pack FROM sale_items i LEFT JOIN products p ON p.id = i.product_id WHERE i.sale_id = ? ORDER BY i.id`
     )
     .all(id);
+  sale.remito = db.prepare("SELECT id, pv, number FROM remitos WHERE sale_id = ? AND status = 'emitido' ORDER BY id DESC").get(id) || null;
   return sale;
 }
 
@@ -170,6 +172,8 @@ sales.post('/:id/cancel', (req, res) => {
     addCash('efectivo', -sale.paid_cash, `Anulación venta #${sale.id}`, 'venta', sale.id);
     addCash('transferencia', -sale.paid_transfer, `Anulación venta #${sale.id}`, 'venta', sale.id);
     if (sale.customer_id) addAccount('cliente', sale.customer_id, -sale.on_account, `Anulación venta #${sale.id}`, 'venta', sale.id);
+    // Los remitos de la venta quedan anulados
+    db.prepare("UPDATE remitos SET status = 'anulado' WHERE sale_id = ?").run(sale.id);
     // Si la venta salió de un presupuesto, el presupuesto vuelve a quedar pendiente
     db.prepare("UPDATE quotes SET status = 'pendiente', sale_id = NULL WHERE sale_id = ?").run(sale.id);
   })();
@@ -269,6 +273,73 @@ quotes.post('/:id/cancel', (req, res) => {
   const q = getQuote(req.params.id);
   if (q.status !== 'pendiente') throw new HttpError(400, `El presupuesto ya está ${q.status}`);
   db.prepare("UPDATE quotes SET status = 'anulado' WHERE id = ?").run(q.id);
+  res.json({ ok: true });
+});
+
+// =================== REMITOS X ===================
+const remitos = express.Router();
+const fmtRemito = (r) => `${String(r.pv).padStart(4, '0')}-${String(r.number).padStart(8, '0')}`;
+
+const REMITO_SELECT = `SELECT r.*, s.total, s.status sale_status, s.customer_id, c.name customer_name, c.tax_id customer_tax_id,
+    c.phone customer_phone, c.address customer_address
+  FROM remitos r JOIN sales s ON s.id = r.sale_id LEFT JOIN customers c ON c.id = s.customer_id`;
+
+remitos.get('/', (req, res) => {
+  const where = [];
+  const params = [];
+  dateFilters(req, 'r.date', where, params);
+  if (req.query.customer_id) {
+    where.push('s.customer_id = ?');
+    params.push(req.query.customer_id);
+  }
+  if (req.query.status) {
+    where.push('r.status = ?');
+    params.push(req.query.status);
+  }
+  const rows = db
+    .prepare(`${REMITO_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY r.id DESC LIMIT ?`)
+    .all(...params, Math.min(num(req.query.limit, 300), 5000));
+  rows.forEach((r) => (r.code = fmtRemito(r)));
+  res.json(rows);
+});
+
+function getRemito(id) {
+  const r = db.prepare(`${REMITO_SELECT} WHERE r.id = ?`).get(id);
+  if (!r) throw new HttpError(404, 'Remito no encontrado');
+  r.code = fmtRemito(r);
+  r.sale = getSale(r.sale_id);
+  return r;
+}
+
+remitos.get('/:id', (req, res) => res.json(getRemito(req.params.id)));
+
+/** Emite un remito para una venta. El número es correlativo por punto de venta. */
+remitos.post('/', (req, res) => {
+  const sale = getSale(req.body.sale_id);
+  if (sale.status === 'anulada') throw new HttpError(400, 'La venta está anulada');
+  if (sale.remito && !req.body.force)
+    throw new HttpError(409, `La venta #${sale.id} ya tiene el remito ${fmtRemito(sale.remito)}`);
+  const pv = Math.max(1, Math.round(num(getSetting('remito_pv'), 1)));
+  const id = db.transaction(() => {
+    const max = db.prepare('SELECT COALESCE(MAX(number), 0) m FROM remitos WHERE pv = ?').get(pv).m;
+    const number = Math.max(max + 1, Math.round(num(getSetting('remito_next'), 1)));
+    const valued = req.body.valued === undefined ? getSetting('remito_valued') !== '0' : Boolean(req.body.valued);
+    const r = db
+      .prepare('INSERT INTO remitos (pv, number, sale_id, delivery_address, notes, valued) VALUES (?,?,?,?,?,?)')
+      .run(pv, number, sale.id, emptyToNull(req.body.delivery_address) || sale.customer_address || null, emptyToNull(req.body.notes), valued ? 1 : 0);
+    db.prepare("INSERT INTO settings (key, value) VALUES ('remito_next', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
+      String(number + 1)
+    );
+    return r.lastInsertRowid;
+  })();
+  const r = getRemito(id);
+  res.status(201).json({ id, code: r.code });
+});
+
+remitos.post('/:id/cancel', (req, res) => {
+  const r = getRemito(req.params.id);
+  if (r.status === 'anulado') throw new HttpError(400, 'El remito ya está anulado');
+  db.prepare("UPDATE remitos SET status = 'anulado' WHERE id = ?").run(r.id);
   res.json({ ok: true });
 });
 
@@ -381,4 +452,4 @@ purchases.post('/:id/cancel', (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { sales, purchases, quotes, getSale, getQuote, dateFilters, buildLines };
+module.exports = { sales, purchases, quotes, remitos, getSale, getQuote, getRemito, dateFilters, buildLines };

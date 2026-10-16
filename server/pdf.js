@@ -37,10 +37,10 @@ function business() {
   };
 }
 
-function newDoc(res, filename, title) {
+function newDoc(res, filename, title, { inline } = {}) {
   const doc = new PDFDocument({ size: 'A4', margin: MARGIN, info: { Title: title }, bufferPages: true });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${filename}"`);
   doc.pipe(res);
   return doc;
 }
@@ -332,4 +332,139 @@ function priceListPdf(res, list, rows, { photos, layout, customerName, filename 
   doc.end();
 }
 
-module.exports = { quotePdf, salePdf, priceListPdf };
+// ---------------- Remito X ----------------
+/** Bultos completos + unidades sueltas, ej: "2 + 6 u." */
+function packs(quantity, perPack) {
+  if (!perPack || perPack <= 1) return '';
+  const full = Math.floor(quantity / perPack);
+  const rest = Math.round((quantity - full * perPack) * 100) / 100;
+  if (!full) return '';
+  return rest ? `${full} + ${qty(rest)} u.` : String(full);
+}
+
+const COPY_NAMES = ['ORIGINAL', 'DUPLICADO', 'TRIPLICADO'];
+
+function remitoPage(doc, r, copyName) {
+  const b = business();
+  const s = r.sale;
+  const W = contentWidth(doc);
+  const top = MARGIN;
+  const boxH = 112;
+
+  // Marco del encabezado dividido en dos, con el recuadro de la letra X al medio
+  doc.rect(MARGIN, top, W, boxH).lineWidth(1).strokeColor(DARK).stroke();
+  const mid = MARGIN + W / 2;
+  doc.moveTo(mid, top + 66).lineTo(mid, top + boxH).stroke();
+  const xBox = 44;
+  doc.rect(mid - xBox / 2, top, xBox, 46).fillAndStroke('#ffffff', DARK);
+  doc.font('Helvetica-Bold').fontSize(30).fillColor(DARK).text('X', mid - xBox / 2, top + 7, { width: xBox, align: 'center' });
+  doc.font('Helvetica').fontSize(6).fillColor(DARK).text('DOCUMENTO NO VÁLIDO\nCOMO FACTURA', mid - 40, top + 49, { width: 80, align: 'center' });
+
+  // Izquierda: logo y datos del negocio
+  let ly = top + 8;
+  if (b.logo) {
+    try {
+      doc.image(b.logo, MARGIN + 8, ly, { fit: [120, 48] });
+      ly += 52;
+    } catch {
+      /* imagen inválida */
+    }
+  }
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(DARK).text(b.name, MARGIN + 8, ly, { width: W / 2 - 60 });
+  doc.font('Helvetica').fontSize(7.5).fillColor('#333333');
+  const left = [getSetting('business_address'), getSetting('business_phone') && `Tel.: ${getSetting('business_phone')}`, getSetting('business_iva')].filter(Boolean);
+  for (const l of left) doc.text(l, MARGIN + 8, doc.y + 1, { width: W / 2 - 60 });
+
+  // Derecha: número, fecha y datos fiscales
+  const rx = mid + 50;
+  const rw = W / 2 - 58;
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED).text(copyName, rx, top + 6, { width: rw, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(DARK).text('REMITO', rx, top + 18, { width: rw });
+  doc.fontSize(11).text(`N° ${r.code}`, rx, doc.y + 1, { width: rw });
+  doc.font('Helvetica').fontSize(8.5).fillColor('#333333');
+  const right = [
+    `Fecha: ${fmtDate(r.date)}`,
+    getSetting('business_tax_id') && `CUIT: ${getSetting('business_tax_id')}`,
+    getSetting('business_iibb') && `Ing. Brutos: ${getSetting('business_iibb')}`,
+    getSetting('business_start') && `Inicio de actividades: ${getSetting('business_start')}`,
+  ].filter(Boolean);
+  for (const l of right) doc.text(l, rx, doc.y + 1.5, { width: rw });
+
+  // Destinatario
+  let y = top + boxH + 8;
+  const destH = 52;
+  doc.rect(MARGIN, y, W, destH).lineWidth(0.8).strokeColor(DARK).stroke();
+  const line = (label, value, x, yy, w) => {
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(DARK).text(`${label}: `, x, yy, { continued: true, width: w });
+    doc.font('Helvetica').text(value || '—');
+  };
+  line('Señor/es', s.customer_name || 'Consumidor final', MARGIN + 8, y + 7, W / 2);
+  line('CUIT/DNI', s.customer_tax_id, mid + 8, y + 7, W / 2 - 16);
+  line('Dirección de entrega', r.delivery_address, MARGIN + 8, y + 22, W - 16);
+  line('Teléfono', r.customer_phone, MARGIN + 8, y + 37, W / 2);
+  line('Venta N°', String(s.id), mid + 8, y + 37, W / 2 - 16);
+  doc.y = y + destH + 10;
+  doc.x = MARGIN;
+
+  // Detalle
+  const valued = Boolean(r.valued);
+  table(
+    doc,
+    [
+      { label: 'Código', width: 70, render: (i) => i.code || i.barcode || '' },
+      { label: 'Descripción', width: valued ? 250 : 340, key: 'description' },
+      { label: 'Cantidad', width: 60, align: 'right', render: (i) => qty(i.quantity), bold: true },
+      { label: 'Bultos', width: 55, align: 'right', render: (i) => packs(i.quantity, i.units_per_pack) },
+      ...(valued
+        ? [
+            { label: 'P. unit.', width: 80, align: 'right', render: (i) => money(i.unit_price) },
+            { label: 'Importe', width: 85, align: 'right', render: (i) => money(i.subtotal), bold: true },
+          ]
+        : []),
+    ],
+    s.items
+  );
+  const units = s.items.reduce((a, i) => a + Number(i.quantity), 0);
+  if (valued)
+    totals(doc, [
+      ['Total de unidades', qty(units)],
+      ...(s.discount ? [['Subtotal', money(s.subtotal)], ['Descuento', '-' + money(s.discount)]] : []),
+      ['TOTAL', money(s.total), true],
+    ]);
+  else totals(doc, [['Total de unidades', qty(units), true]]);
+
+  if (r.notes) paragraph(doc, `Observaciones: ${r.notes}`);
+  paragraph(doc, getSetting('remito_footer'), { muted: true, size: 8.5, gap: 10 });
+
+  // Conformidad de recepción al pie de la hoja
+  const sigY = Math.max(doc.y + 30, doc.page.height - MARGIN - 70);
+  if (sigY + 50 > doc.page.height - MARGIN) {
+    doc.addPage();
+  }
+  const sy = Math.min(sigY, doc.page.height - MARGIN - 50);
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor(DARK).text('RECIBÍ CONFORME', MARGIN, sy - 16);
+  const colW = W / 4;
+  ['Firma', 'Aclaración', 'DNI', 'Fecha'].forEach((t, i) => {
+    const x = MARGIN + i * colW;
+    doc.moveTo(x + 8, sy + 22).lineTo(x + colW - 8, sy + 22).lineWidth(0.6).strokeColor(DARK).stroke();
+    doc.font('Helvetica').fontSize(8).fillColor(MUTED).text(t, x + 8, sy + 26, { width: colW - 16, align: 'center' });
+  });
+  if (r.status === 'anulado' || s.status === 'anulada') {
+    doc.save();
+    doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
+    doc.font('Helvetica-Bold').fontSize(90).fillColor('#b91c1c').opacity(0.18).text('ANULADO', 0, doc.page.height / 2 - 50, { width: doc.page.width, align: 'center' });
+    doc.restore();
+  }
+}
+
+function remitoPdf(res, r, { inline } = {}) {
+  const doc = newDoc(res, `remito_${r.code}.pdf`, `Remito ${r.code}`, { inline });
+  const copies = Math.min(3, Math.max(1, Math.round(Number(getSetting('remito_copies')) || 2)));
+  for (let c = 0; c < copies; c++) {
+    if (c > 0) doc.addPage();
+    remitoPage(doc, r, COPY_NAMES[c]);
+  }
+  doc.end();
+}
+
+module.exports = { quotePdf, salePdf, priceListPdf, remitoPdf };

@@ -157,7 +157,11 @@ function renderCart() {
   $('#cartSum').innerHTML = showPrices
     ? `<span>Total</span><span>${money(total)}</span>`
     : '<span class="muted" style="font-size:14px;font-weight:400">Te confirmamos los precios por WhatsApp</span>';
-  if (showPrices && min && total < min) $('#cartSum').insertAdjacentHTML('afterend', `<div class="notice" id="minNotice">Pedido mínimo: ${money(min)}</div>`);
+  document.querySelectorAll('#minNotice').forEach((e) => e.remove());
+  const belowMin = Boolean(showPrices && min && total < min);
+  if (belowMin)
+    $('#cartSum').insertAdjacentHTML('afterend', `<div class="notice" id="minNotice">El pedido mínimo es de ${money(min)}. Te faltan ${money(min - total)}.</div>`);
+  $('#sendBtn').disabled = belowMin;
 }
 
 function openDrawer() {

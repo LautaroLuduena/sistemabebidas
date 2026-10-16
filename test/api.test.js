@@ -409,3 +409,26 @@ test('pedidos web: no se puede pedir más que el stock, la mercadería queda res
   assert.equal((await find()).max, 5);
   await call('PUT', '/settings', { shop_enabled: '0' });
 });
+
+test('pedido mínimo por lista de precios en la tienda', async () => {
+  await call('PUT', '/settings', { shop_enabled: '1', shop_private: '0', shop_min_order: '1000', shop_price_list: '' });
+  const pub = (path, body) =>
+    fetch(base + '/shop' + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}).then(async (r) => ({ status: r.status, data: await r.json() }));
+  const mayor = await call('POST', '/price-lists', { name: 'Mayorista Min', markup: 20, min_order: 50000 });
+  assert.equal((await call('GET', '/price-lists')).find((l) => l.id === mayor.id).min_order, 50000);
+  const prod = await call('POST', '/products', { name: 'Min Test', cost: 1000, stock: 100 });
+  const { id: cid } = await call('POST', '/customers', { name: 'Mayorista Min Cliente', price_list_id: mayor.id });
+  const { token } = await call('POST', `/customers/${cid}/shop-link`, {});
+
+  // Público (lista predeterminada sin mínimo propio): usa el general de $1000
+  assert.equal((await pub('/info')).data.min_order, 1000);
+  // Cliente mayorista: usa el de su lista
+  assert.equal((await pub(`/info?c=${token}`)).data.min_order, 50000);
+  const small = await pub('/orders', { c: token, items: [{ product_id: prod.id, quantity: 2 }] });
+  assert.equal(small.status, 400);
+  assert.match(small.data.error, /mínimo/);
+  const big = await pub('/orders', { c: token, items: [{ product_id: prod.id, quantity: 50 }] });
+  assert.equal(big.status, 201);
+  await call('POST', `/quotes/${big.data.id}/cancel`);
+  await call('PUT', '/settings', { shop_enabled: '0', shop_min_order: '' });
+});

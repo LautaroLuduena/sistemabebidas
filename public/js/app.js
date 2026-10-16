@@ -2318,9 +2318,9 @@ views.listas = {
     const [lists, cats, customers] = await Promise.all([cache.lists(true), cache.categories(true), api('/customers')]);
     view.innerHTML = `
       <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="lNew">➕ Nueva lista</button></div>
-      <div class="card" style="padding:0"><table class="table"><thead><tr><th>Lista</th><th>Descripción</th><th class="n">Recargo s/ costo</th><th></th><th></th></tr></thead><tbody>
+      <div class="card" style="padding:0"><table class="table"><thead><tr><th>Lista</th><th>Descripción</th><th class="n">Recargo s/ costo</th><th class="n">Pedido mínimo tienda</th><th></th><th></th></tr></thead><tbody>
         ${lists.map((l) => `<tr><td><b>${esc(l.name)}</b> ${l.is_default ? '<span class="badge info">Predeterminada</span>' : ''}</td><td>${esc(l.description || '')}</td>
-          <td class="n">${l.markup}%</td>
+          <td class="n">${l.markup}%</td><td class="n">${l.min_order > 0 ? money(l.min_order) : '<span class="muted">—</span>'}</td>
           <td class="actions"><button class="btn sm" data-adjust="${l.id}">📈 Actualizar precios</button></td>
           <td class="actions"><button class="btn sm" data-edit="${l.id}">✏️</button><button class="btn sm danger" data-del="${l.id}">✕</button></td></tr>`).join('')}
       </tbody></table></div>
@@ -2359,6 +2359,7 @@ views.listas = {
         body: `<div class="form-grid">
           ${field('Nombre *', `<input name="name" value="${esc(l && l.name)}" placeholder="Ej: Mayorista, Bares, Distribuidor">`)}
           ${field('Recargo sobre el costo (%)', `<input name="markup" value="${l ? l.markup : ''}" inputmode="decimal">`)}
+          ${field('Pedido mínimo en la tienda online ($)', `<input name="min_order" value="${l && l.min_order ? l.min_order : ''}" inputmode="decimal" placeholder="0 = sin mínimo">`)}
           ${field('Descripción', `<input name="description" value="${esc(l && l.description)}">`, 'full')}
           <label class="check full"><input type="checkbox" name="is_default" ${l && l.is_default ? 'checked' : ''}> Lista predeterminada (para consumidor final)</label></div>`,
         actions: [
@@ -2369,6 +2370,7 @@ views.listas = {
             onClick: async (el) => {
               const f = formData(el);
               f.markup = num(f.markup);
+              f.min_order = num(f.min_order);
               await api(l ? '/price-lists/' + l.id : '/price-lists', { method: l ? 'PUT' : 'POST', body: f });
               reload();
             },
@@ -2519,7 +2521,8 @@ views.config = {
           ${field('WhatsApp que recibe los pedidos', `<input name="shop_whatsapp" value="${esc(s.shop_whatsapp || '')}" placeholder="Ej: 5493511234567 (con 549 y sin 0 ni 15)">`)}
           ${field('Precios que ve el público', `<select name="shop_price_list">${opt('', 'Lista predeterminada', s.shop_price_list || '')}${lists.map((l) => opt(l.id, 'Lista ' + l.name, s.shop_price_list || '')).join('')}${opt('none', 'No mostrar precios', s.shop_price_list || '')}</select>`)}
           ${field('Stock', `<select name="shop_stock_mode">${opt('disponible', 'Mostrar "Disponible / Últimas unidades / Sin stock"', s.shop_stock_mode || 'disponible')}${opt('exacto', 'Mostrar la cantidad exacta', s.shop_stock_mode || 'disponible')}</select>`)}
-          ${field('Pedido mínimo ($, 0 = sin mínimo)', `<input name="shop_min_order" inputmode="decimal" value="${esc(s.shop_min_order || '')}">`)}
+          ${field('Pedido mínimo general ($)', `<input name="shop_min_order" inputmode="decimal" value="${esc(s.shop_min_order || '')}" placeholder="0 = sin mínimo">`)}
+          <p class="muted full" style="margin:-4px 0 0;font-size:12px">Cada lista de precios puede tener su propio pedido mínimo (en <a href="#/listas">Listas de precios</a>). El general se usa solo para las listas que no tienen uno.</p>
           <label class="check full"><input type="checkbox" name="shop_hide_out_of_stock" ${s.shop_hide_out_of_stock === '1' ? 'checked' : ''}> Ocultar productos sin stock</label>
           <label class="check full"><input type="checkbox" name="shop_private" ${s.shop_private === '1' ? 'checked' : ''}> Solo para clientes con link personal (el link general no muestra nada)</label>
           ${field('Mensaje para los clientes (opcional)', `<textarea name="shop_message" rows="2" placeholder="Ej: Entregas de lunes a sábado. Pedidos antes de las 18 hs salen al día siguiente.">${esc(s.shop_message || '')}</textarea>`, 'full')}

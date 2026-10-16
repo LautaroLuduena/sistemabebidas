@@ -47,6 +47,9 @@ function shopConfig() {
   };
 }
 
+/** Pedido mínimo: el de la lista de precios del cliente; si la lista no tiene, el general de la tienda. */
+const minOrderFor = (cfg, list) => (list && list.min_order > 0 ? list.min_order : cfg.minOrder);
+
 /** Resuelve el contexto del visitante: cliente (por link personal) y lista de precios. */
 function context(req) {
   const cfg = shopConfig();
@@ -83,7 +86,7 @@ router.get('/info', (req, res) => {
     business_phone: getSetting('business_phone') || '',
     has_whatsapp: Boolean(cfg.whatsapp),
     show_prices: Boolean(list),
-    min_order: cfg.minOrder,
+    min_order: minOrderFor(cfg, list),
     message: cfg.message,
     categories,
     customer: customer ? { name: customer.name, phone: customer.phone, address: customer.address } : null,
@@ -179,7 +182,8 @@ router.post('/orders', (req, res) => {
   }
   if (!lines.length) throw new HttpError(400, 'Los productos del pedido ya no están disponibles');
   const total = round2(lines.reduce((a, l) => a + l.subtotal, 0));
-  if (list && cfg.minOrder && total < cfg.minOrder) throw new HttpError(400, `El pedido mínimo es de ${money(cfg.minOrder)}`);
+  const minOrder = minOrderFor(cfg, list);
+  if (list && minOrder && total < minOrder) throw new HttpError(400, `El pedido mínimo es de ${money(minOrder)}`);
 
   const id = db.transaction(() => {
     // No se puede pedir más de lo disponible (stock − reservas de otros pedidos). Dentro de la

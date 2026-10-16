@@ -75,22 +75,24 @@ function savePriceList(req, id) {
   const name = emptyToNull(req.body.name);
   if (!name) throw new HttpError(400, 'El nombre es obligatorio');
   const markup = num(req.body.markup);
+  const minOrder = round2(Math.max(0, num(req.body.min_order)));
   const isDefault = req.body.is_default ? 1 : 0;
   return db.transaction(() => {
     if (isDefault) db.prepare('UPDATE price_lists SET is_default = 0').run();
     if (id) {
-      db.prepare('UPDATE price_lists SET name=?, description=?, markup=?, is_default=? WHERE id=?').run(
+      db.prepare('UPDATE price_lists SET name=?, description=?, markup=?, is_default=?, min_order=? WHERE id=?').run(
         name,
         emptyToNull(req.body.description),
         markup,
         isDefault,
+        minOrder,
         id
       );
       return id;
     }
     return db
-      .prepare('INSERT INTO price_lists (name, description, markup, is_default) VALUES (?,?,?,?)')
-      .run(name, emptyToNull(req.body.description), markup, isDefault).lastInsertRowid;
+      .prepare('INSERT INTO price_lists (name, description, markup, is_default, min_order) VALUES (?,?,?,?,?)')
+      .run(name, emptyToNull(req.body.description), markup, isDefault, minOrder).lastInsertRowid;
   })();
 }
 

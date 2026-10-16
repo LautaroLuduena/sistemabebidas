@@ -85,7 +85,8 @@ function partyRouter({ table, partyType, label }) {
     const id = Number(req.params.id);
     const hasHistory =
       db.prepare('SELECT 1 FROM account_movements WHERE party_type = ? AND party_id = ? LIMIT 1').get(partyType, id) ||
-      db.prepare(`SELECT 1 FROM ${isCustomer ? 'sales WHERE customer_id' : 'purchases WHERE supplier_id'} = ? LIMIT 1`).get(id);
+      db.prepare(`SELECT 1 FROM ${isCustomer ? 'sales WHERE customer_id' : 'purchases WHERE supplier_id'} = ? LIMIT 1`).get(id) ||
+      (isCustomer && db.prepare('SELECT 1 FROM quotes WHERE customer_id = ? LIMIT 1').get(id));
     if (hasHistory) {
       db.prepare(`UPDATE ${table} SET active = 0 WHERE id = ?`).run(id);
       return res.json({ ok: true, deactivated: true });

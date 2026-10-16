@@ -107,10 +107,19 @@ router.put('/price-lists/:id', (req, res) => {
 router.delete('/price-lists/:id', (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM price_lists').get().n;
   if (n <= 1) throw new HttpError(400, 'Debe existir al menos una lista de precios');
-  db.prepare('DELETE FROM price_lists WHERE id = ?').run(req.params.id);
-  if (!db.prepare('SELECT 1 FROM price_lists WHERE is_default = 1').get()) {
-    db.prepare('UPDATE price_lists SET is_default = 1 WHERE id = (SELECT MIN(id) FROM price_lists)').run();
-  }
+  const id = Number(req.params.id);
+  db.transaction(() => {
+    // Las ventas y presupuestos que usaron esta lista pasan a la lista predeterminada.
+    // Los precios de cada comprobante no cambian: están guardados en sus renglones.
+    const fallback = db.prepare('SELECT id FROM price_lists WHERE id <> ? ORDER BY is_default DESC, id LIMIT 1').get(id).id;
+    db.prepare('UPDATE sales SET price_list_id = ? WHERE price_list_id = ?').run(fallback, id);
+    db.prepare('UPDATE quotes SET price_list_id = ? WHERE price_list_id = ?').run(fallback, id);
+    db.prepare("DELETE FROM settings WHERE key = 'shop_price_list' AND value = ?").run(String(id));
+    db.prepare('DELETE FROM price_lists WHERE id = ?').run(id);
+    if (!db.prepare('SELECT 1 FROM price_lists WHERE is_default = 1').get()) {
+      db.prepare('UPDATE price_lists SET is_default = 1 WHERE id = (SELECT MIN(id) FROM price_lists)').run();
+    }
+  })();
   res.json({ ok: true });
 });
 
@@ -290,7 +299,8 @@ router.put('/products/:id', imageUpload.single('image'), (req, res) => {
 router.delete('/products/:id', (req, res) => {
   const used =
     db.prepare('SELECT 1 FROM sale_items WHERE product_id = ? LIMIT 1').get(req.params.id) ||
-    db.prepare('SELECT 1 FROM purchase_items WHERE product_id = ? LIMIT 1').get(req.params.id);
+    db.prepare('SELECT 1 FROM purchase_items WHERE product_id = ? LIMIT 1').get(req.params.id) ||
+    db.prepare('SELECT 1 FROM quote_items WHERE product_id = ? LIMIT 1').get(req.params.id);
   if (used) {
     // Tiene historial: se da de baja pero se conserva
     db.prepare('UPDATE products SET active = 0 WHERE id = ?').run(req.params.id);

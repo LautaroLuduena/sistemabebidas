@@ -55,6 +55,10 @@ function createApp() {
   app.use((err, req, res, next) => {
     let status = err instanceof HttpError ? err.status : 500;
     let message = err.message || 'Error interno';
+    if (err && err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      status = 409;
+      message = 'No se puede completar: este dato está siendo usado en otros registros (ventas, compras, presupuestos, etc.).';
+    }
     if (err instanceof multer.MulterError) {
       status = 400;
       message = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo es demasiado grande' : message;

@@ -335,3 +335,20 @@ test('tienda online: desactivada por defecto, catálogo sin costos, pedido web y
   assert.equal((await pub(`/info?c=${token}`)).status, 200);
   await call('PUT', '/settings', { shop_private: '0', shop_enabled: '0' });
 });
+
+test('borrar lista de precios, producto o cliente que ya se usaron no da error de clave foránea', async () => {
+  const list = await call('POST', '/price-lists', { name: 'Temporal FK', markup: 10 });
+  const prod = await call('POST', '/products', { name: 'Producto FK', cost: 100, stock: 5 });
+  const cli = await call('POST', '/customers', { name: 'Cliente FK', price_list_id: list.id });
+  await call('POST', '/quotes', { customer_id: cli.id, price_list_id: list.id, items: [{ product_id: prod.id, quantity: 1 }] });
+  const sale = await call('POST', '/sales', { price_list_id: list.id, items: [{ product_id: prod.id, quantity: 1, unit_price: 777 }], paid_cash: 777 });
+
+  await call('DELETE', `/price-lists/${list.id}`);
+  assert.ok(!(await call('GET', '/price-lists')).some((l) => l.id === list.id));
+  const s = await call('GET', `/sales/${sale.id}`);
+  assert.equal(s.items[0].unit_price, 777); // el precio cobrado no cambia
+  assert.equal((await call('GET', `/customers/${cli.id}`)).price_list_id, null);
+
+  assert.equal((await call('DELETE', `/customers/${cli.id}`)).deactivated, true);
+  assert.equal((await call('DELETE', `/products/${prod.id}`)).deactivated, true);
+});

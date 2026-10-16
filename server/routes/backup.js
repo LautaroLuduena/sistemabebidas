@@ -27,6 +27,8 @@ const DATA_TABLES = [
   'cash_movements',
   'account_movements',
   'stock_movements',
+  'quotes',
+  'quote_items',
 ];
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif)$/i;
 

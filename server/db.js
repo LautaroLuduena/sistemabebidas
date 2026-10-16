@@ -160,6 +160,32 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   notes TEXT
 );
 
+-- Presupuestos: no mueven stock, caja ni cuenta corriente hasta que se pasan a venta
+CREATE TABLE IF NOT EXISTS quotes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  customer_id INTEGER REFERENCES customers(id),
+  customer_name TEXT,                         -- para presupuestos a alguien que no es cliente cargado
+  price_list_id INTEGER REFERENCES price_lists(id),
+  subtotal REAL NOT NULL DEFAULT 0,
+  discount REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0,
+  valid_until TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente | vendido | anulado
+  sale_id INTEGER REFERENCES sales(id)
+);
+
+CREATE TABLE IF NOT EXISTS quote_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  description TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  unit_price REAL NOT NULL,
+  subtotal REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT

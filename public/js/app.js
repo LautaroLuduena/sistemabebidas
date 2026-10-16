@@ -315,7 +315,7 @@ views[''] = {
 };
 
 // ---------- Vender (punto de venta) ----------
-const pos = { cart: [], customer_id: '', price_list_id: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '' };
+const pos = { cart: [], customer_id: '', customer_name: '', price_list_id: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '', quote_id: null };
 
 views.vender = {
   title: 'Vender',
@@ -325,6 +325,10 @@ views.vender = {
     view.innerHTML = `
       <div class="pos-layout">
         <div>
+          ${pos.quote_id ? `<div class="card" style="background:var(--primary-soft);border-color:var(--primary)">
+            📄 Trabajando sobre el <b>presupuesto #${pos.quote_id}</b>: podés modificarlo y guardarlo, o confirmar la venta.
+            <div class="toolbar" style="margin:8px 0 0"><button class="btn sm" id="quoteReprice">🔄 Actualizar a precios actuales</button>
+            <button class="btn sm" id="quoteUnlink">Desvincular</button></div></div>` : ''}
           <div class="card">
             <div class="field"><input id="posSearch" class="big" placeholder="🔍 Escaneá el código de barras o buscá por nombre / código" autocomplete="off"></div>
           </div>
@@ -356,6 +360,7 @@ views.vender = {
             ${field('Notas', `<input id="posNotes" value="${esc(pos.notes)}" placeholder="Opcional">`)}
             <div class="toolbar" style="margin-top:12px">
               <button class="btn" id="posClear">Vaciar</button><span class="spacer"></span>
+              <button class="btn" id="posQuote" title="Guardar como presupuesto: no descuenta stock ni mueve caja">📄 ${pos.quote_id ? 'Guardar presupuesto' : 'Presupuesto'}</button>
               <button class="btn ok lg" id="posConfirm">✔ Confirmar venta</button>
             </div>
           </div>
@@ -490,7 +495,7 @@ views.vender = {
         })
     );
     const reset = () => {
-      Object.assign(pos, { cart: [], customer_id: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '', price_list_id: defaultList(lists) });
+      Object.assign(pos, { cart: [], customer_id: '', customer_name: '', discount: 0, paid_cash: '', paid_transfer: '', notes: '', price_list_id: defaultList(lists), quote_id: null });
     };
     $('#posClear').onclick = () => {
       reset();
@@ -513,6 +518,7 @@ views.vender = {
           paid_cash: num(pos.paid_cash),
           paid_transfer: num(pos.paid_transfer),
           notes: pos.notes,
+          quote_id: pos.quote_id,
         },
       });
       reset();
@@ -530,9 +536,149 @@ views.vender = {
       views.vender.render(view);
     });
 
+    $('#posQuote').onclick = safe(async () => {
+      if (!pos.cart.length) throw new Error('Agregá productos al presupuesto');
+      const settings = await api('/settings');
+      const c = customerById(pos.customer_id);
+      modal({
+        title: pos.quote_id ? `Guardar presupuesto #${pos.quote_id}` : 'Nuevo presupuesto',
+        body: `<p>Total: <b>${money(totals().total)}</b> · ${pos.cart.length} productos. No descuenta stock ni mueve la caja.</p>
+          <div class="form-grid">
+          ${c ? field('Cliente', `<input value="${esc(c.name)}" disabled>`) : field('Nombre del cliente (opcional)', `<input name="customer_name" value="${esc(pos.customer_name)}" placeholder="Ej: Juan Pérez - Evento sábado">`)}
+          ${field('Validez (días)', `<input name="valid_days" inputmode="numeric" value="${esc(settings.quote_valid_days || 7)}">`)}
+          ${field('Observaciones', `<textarea name="notes" rows="2" placeholder="Ej: Entrega a domicilio incluida">${esc(pos.notes)}</textarea>`, 'full')}</div>`,
+        actions: [
+          { label: 'Cancelar' },
+          {
+            label: 'Guardar presupuesto',
+            cls: 'primary',
+            onClick: async (el) => {
+              const f = formData(el);
+              const body = {
+                customer_id: pos.customer_id || null,
+                customer_name: f.customer_name,
+                price_list_id: pos.price_list_id,
+                items: pos.cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+                discount: num(pos.discount),
+                valid_days: num(f.valid_days),
+                notes: f.notes,
+              };
+              const r = pos.quote_id
+                ? await api('/quotes/' + pos.quote_id, { method: 'PUT', body })
+                : await api('/quotes', { method: 'POST', body });
+              reset();
+              views.vender.render(view);
+              modal({
+                title: `Presupuesto #${r.id} guardado`,
+                body: `<div class="total-box">${money(r.total)}</div><p class="muted">Lo encontrás en <a href="#/presupuestos">Presupuestos</a> para imprimirlo o pasarlo a venta.</p>`,
+                actions: [
+                  { label: '🖨️ Imprimir / PDF', onClick: () => { window.open(`/api/quotes/${r.id}/print`, '_blank'); return false; } },
+                  { label: 'Listo', cls: 'primary' },
+                ],
+              });
+            },
+          },
+        ],
+      });
+    });
+    if (pos.quote_id) {
+      $('#quoteReprice').onclick = reprice;
+      $('#quoteUnlink').onclick = () => {
+        pos.quote_id = null;
+        views.vender.render(view);
+      };
+    }
+
     renderCustomer();
     renderCart();
     $('#posSearch').focus();
+  },
+};
+
+/** Carga un presupuesto en Vender (para venderlo/editarlo, o como copia nueva si duplicate = true) */
+async function openQuoteInPos(id, duplicate = false) {
+  const q = await api('/quotes/' + id);
+  const missing = q.items.filter((i) => !i.product_id);
+  Object.assign(pos, {
+    cart: q.items
+      .filter((i) => i.product_id)
+      .map((i) => ({
+        product_id: i.product_id,
+        name: i.description,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        stock: i.stock ?? 0,
+        image_url: i.image ? `/uploads/${i.image}` : null,
+        units_per_pack: i.units_per_pack || 1,
+      })),
+    customer_id: q.customer_id || '',
+    customer_name: q.customer_id ? '' : q.customer_name || '',
+    price_list_id: q.price_list_id || '',
+    discount: q.discount || 0,
+    paid_cash: '',
+    paid_transfer: '',
+    notes: q.notes || '',
+    quote_id: duplicate ? null : q.id,
+  });
+  if (missing.length) toast(`${missing.length} productos del presupuesto ya no existen y no se cargaron`, 'error');
+  if (location.hash === '#/vender') route();
+  else location.hash = '#/vender';
+}
+
+// ---------- Presupuestos ----------
+views.presupuestos = {
+  title: 'Presupuestos',
+  async render(view) {
+    const customers = await api('/customers?include_inactive=1');
+    const from = new Date(Date.now() - 60 * 864e5).toLocaleDateString('sv-SE');
+    view.innerHTML = `
+      <div class="toolbar">
+        <input type="date" id="fFrom" value="${from}"> <input type="date" id="fTo" value="${today()}">
+        <select id="fCustomer"><option value="">Todos los clientes</option>${customers.map((c) => opt(c.id, c.name)).join('')}</select>
+        <select id="fStatus"><option value="pendiente">Pendientes</option><option value="vendido">Pasados a venta</option><option value="anulado">Anulados</option><option value="">Todos</option></select>
+        <span class="spacer"></span><a class="btn primary" href="#/vender" id="qNew">📄 Nuevo presupuesto</a>
+      </div>
+      <p class="muted" style="margin-top:0">Los presupuestos se arman desde <b>Vender</b>: cargá los productos y tocá <b>📄 Presupuesto</b>. No descuentan stock ni mueven la caja hasta que los pasás a venta.</p>
+      <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>Lista</th><th class="n">Total</th><th>Válido hasta</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="qBody"></tbody></table></div></div>`;
+    const badge = (q) => {
+      if (q.status === 'vendido') return `<span class="badge ok">Venta #${q.sale_id}</span>`;
+      if (q.status === 'anulado') return '<span class="badge danger">Anulado</span>';
+      if (q.valid_until && q.valid_until < today()) return '<span class="badge warn">Vencido</span>';
+      return '<span class="badge info">Pendiente</span>';
+    };
+    const load = safe(async () => {
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value });
+      const rows = await api('/quotes?' + qs);
+      $('#qBody').innerHTML = rows.length
+        ? rows
+            .map(
+              (q) => `<tr><td>${q.id}</td><td>${esc(q.date)}</td><td>${esc(q.customer_name || 'Consumidor final')}</td><td>${esc(q.price_list_name || '')}</td>
+          <td class="n"><b>${money(q.total)}</b></td><td>${esc(q.valid_until ? q.valid_until.split('-').reverse().join('/') : '')}</td><td>${badge(q)}</td>
+          <td class="actions"><a class="btn sm" href="/api/quotes/${q.id}/print" target="_blank">🖨️ Imprimir</a>
+            ${q.status === 'pendiente' ? `<button class="btn sm ok" data-open="${q.id}">🛒 Vender / editar</button>` : ''}
+            <button class="btn sm" data-dup="${q.id}" title="Crear un presupuesto nuevo a partir de este">📋 Duplicar</button>
+            ${q.status === 'pendiente' ? `<button class="btn sm danger" data-cancel="${q.id}">Anular</button>` : ''}</td></tr>`
+            )
+            .join('')
+        : '<tr><td colspan="8" class="empty">No hay presupuestos con esos filtros</td></tr>';
+    });
+    ['#fFrom', '#fTo', '#fCustomer', '#fStatus'].forEach((s) => ($(s).onchange = load));
+    $('#qNew').onclick = () => {
+      pos.quote_id = null;
+    };
+    $('#qBody').onclick = safe(async (e) => {
+      const d = e.target.dataset;
+      if (d.open) await openQuoteInPos(d.open);
+      if (d.dup) await openQuoteInPos(d.dup, true);
+      if (d.cancel && (await confirmDialog(`¿Anular el presupuesto #${d.cancel}?`, 'Anular'))) {
+        await api(`/quotes/${d.cancel}/cancel`, { method: 'POST' });
+        toast('Presupuesto anulado', 'ok');
+        load();
+      }
+    });
+    load();
   },
 };
 
@@ -1543,6 +1689,8 @@ views.config = {
         ${field('Teléfono / WhatsApp', `<input name="business_phone" value="${esc(s.business_phone)}">`)}
         ${field('CUIT', `<input name="business_tax_id" value="${esc(s.business_tax_id)}">`)}
         ${field('Pie de la lista de precios', `<input name="price_list_footer" value="${esc(s.price_list_footer)}" placeholder="Ej: Precios sujetos a cambio sin previo aviso">`, 'full')}
+        ${field('Validez de los presupuestos (días)', `<input name="quote_valid_days" inputmode="numeric" value="${esc(s.quote_valid_days || 7)}">`)}
+        ${field('Condiciones del presupuesto (aparecen al pie)', `<textarea name="quote_footer" rows="3" placeholder="Ej: Forma de pago: efectivo o transferencia. Entrega en 48 hs.">${esc(s.quote_footer)}</textarea>`, 'full')}
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="cfgSave">Guardar</button></div></div>
       <div class="card" style="max-width:720px"><h2>👤 Usuarios</h2>

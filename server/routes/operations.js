@@ -8,6 +8,7 @@ const {
   addCash,
   addAccount,
   addStock,
+  getSetting,
 } = require('../services');
 const { emptyToNull, num } = require('./catalog');
 
@@ -81,13 +82,14 @@ function getSale(id) {
 
 sales.get('/:id', (req, res) => res.json(getSale(req.params.id)));
 
-sales.post('/', (req, res) => {
-  const body = req.body || {};
+/**
+ * Arma las líneas de un comprobante de venta o presupuesto: resuelve cliente, lista de precios,
+ * precio de cada producto (o el precio indicado), subtotal, descuento y total.
+ */
+function buildLines(body, what) {
   const items = Array.isArray(body.items) ? body.items : [];
-  if (!items.length) throw new HttpError(400, 'La venta no tiene productos');
-  const customer = body.customer_id
-    ? db.prepare('SELECT * FROM customers WHERE id = ?').get(body.customer_id)
-    : null;
+  if (!items.length) throw new HttpError(400, `${what} no tiene productos`);
+  const customer = body.customer_id ? db.prepare('SELECT * FROM customers WHERE id = ?').get(body.customer_id) : null;
   if (body.customer_id && !customer) throw new HttpError(404, 'Cliente no encontrado');
   const list = getPriceList(body.price_list_id || (customer && customer.price_list_id) || defaultPriceListId());
 
@@ -110,7 +112,15 @@ sales.post('/', (req, res) => {
   const subtotal = round2(lines.reduce((a, l) => a + l.subtotal, 0));
   const discount = round2(Math.max(0, num(body.discount)));
   if (discount > subtotal) throw new HttpError(400, 'El descuento supera el subtotal');
-  const total = round2(subtotal - discount);
+  return { customer, list, lines, subtotal, discount, total: round2(subtotal - discount) };
+}
+
+sales.post('/', (req, res) => {
+  const body = req.body || {};
+  const { customer, list, lines, subtotal, discount, total } = buildLines(body, 'La venta');
+  const quote = body.quote_id ? db.prepare('SELECT * FROM quotes WHERE id = ?').get(body.quote_id) : null;
+  if (body.quote_id && !quote) throw new HttpError(404, 'Presupuesto no encontrado');
+  if (quote && quote.status !== 'pendiente') throw new HttpError(400, `El presupuesto #${quote.id} ya está ${quote.status}`);
   const pay = splitPayment(total, body.paid_cash, body.paid_transfer);
   if (pay.onAccount > 0.004 && !customer)
     throw new HttpError(400, 'Para dejar saldo en cuenta corriente tenés que elegir un cliente');
@@ -144,6 +154,7 @@ sales.post('/', (req, res) => {
     addCash('efectivo', pay.paidCash, `Venta #${saleId}${who}`, 'venta', saleId);
     addCash('transferencia', pay.paidTransfer, `Venta #${saleId}${who}`, 'venta', saleId);
     if (customer) addAccount('cliente', customer.id, pay.onAccount, `Venta #${saleId} (a cuenta)`, 'venta', saleId);
+    if (quote) db.prepare("UPDATE quotes SET status = 'vendido', sale_id = ? WHERE id = ?").run(saleId, quote.id);
     return saleId;
   })();
 
@@ -159,7 +170,105 @@ sales.post('/:id/cancel', (req, res) => {
     addCash('efectivo', -sale.paid_cash, `Anulación venta #${sale.id}`, 'venta', sale.id);
     addCash('transferencia', -sale.paid_transfer, `Anulación venta #${sale.id}`, 'venta', sale.id);
     if (sale.customer_id) addAccount('cliente', sale.customer_id, -sale.on_account, `Anulación venta #${sale.id}`, 'venta', sale.id);
+    // Si la venta salió de un presupuesto, el presupuesto vuelve a quedar pendiente
+    db.prepare("UPDATE quotes SET status = 'pendiente', sale_id = NULL WHERE sale_id = ?").run(sale.id);
   })();
+  res.json({ ok: true });
+});
+
+// =================== PRESUPUESTOS ===================
+const quotes = express.Router();
+
+quotes.get('/', (req, res) => {
+  const where = [];
+  const params = [];
+  dateFilters(req, 'q.date', where, params);
+  if (req.query.customer_id) {
+    where.push('q.customer_id = ?');
+    params.push(req.query.customer_id);
+  }
+  if (req.query.status) {
+    where.push('q.status = ?');
+    params.push(req.query.status);
+  }
+  const rows = db
+    .prepare(
+      `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, pl.name price_list_name,
+              (SELECT COUNT(*) FROM quote_items i WHERE i.quote_id = q.id) items
+       FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id LEFT JOIN price_lists pl ON pl.id = q.price_list_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY q.id DESC LIMIT ?`
+    )
+    .all(...params, Math.min(num(req.query.limit, 300), 5000));
+  res.json(rows);
+});
+
+function getQuote(id) {
+  const q = db
+    .prepare(
+      `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, c.tax_id customer_tax_id, c.address customer_address,
+              c.phone customer_phone, pl.name price_list_name
+       FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id LEFT JOIN price_lists pl ON pl.id = q.price_list_id
+       WHERE q.id = ?`
+    )
+    .get(id);
+  if (!q) throw new HttpError(404, 'Presupuesto no encontrado');
+  q.items = db
+    .prepare(
+      `SELECT i.*, p.code, p.barcode, p.stock, p.image, p.units_per_pack FROM quote_items i
+       LEFT JOIN products p ON p.id = i.product_id WHERE i.quote_id = ? ORDER BY i.id`
+    )
+    .all(id);
+  return q;
+}
+
+quotes.get('/:id', (req, res) => res.json(getQuote(req.params.id)));
+
+function saveQuote(body, id) {
+  const { customer, list, lines, subtotal, discount, total } = buildLines(body, 'El presupuesto');
+  const validDays = Math.max(0, Math.round(num(body.valid_days, num(getSetting('quote_valid_days'), 7))));
+  const fields = [
+    customer ? customer.id : null,
+    customer ? null : emptyToNull(body.customer_name),
+    list.id,
+    subtotal,
+    discount,
+    total,
+    validDays ? new Date(Date.now() + validDays * 864e5).toLocaleDateString('sv-SE') : null,
+    emptyToNull(body.notes),
+  ];
+  return db.transaction(() => {
+    if (id) {
+      db.prepare(
+        `UPDATE quotes SET customer_id=?, customer_name=?, price_list_id=?, subtotal=?, discount=?, total=?, valid_until=?, notes=? WHERE id=?`
+      ).run(...fields, id);
+      db.prepare('DELETE FROM quote_items WHERE quote_id = ?').run(id);
+    } else {
+      id = db
+        .prepare(
+          `INSERT INTO quotes (customer_id, customer_name, price_list_id, subtotal, discount, total, valid_until, notes) VALUES (?,?,?,?,?,?,?,?)`
+        )
+        .run(...fields).lastInsertRowid;
+    }
+    const ins = db.prepare(
+      'INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, subtotal) VALUES (?,?,?,?,?,?)'
+    );
+    for (const l of lines) ins.run(id, l.product ? l.product.id : null, l.description, l.qty, l.unit, l.subtotal);
+    return { id, total };
+  })();
+}
+
+quotes.post('/', (req, res) => res.status(201).json(saveQuote(req.body)));
+
+quotes.put('/:id', (req, res) => {
+  const q = getQuote(req.params.id);
+  if (q.status !== 'pendiente') throw new HttpError(400, `El presupuesto ya está ${q.status}; no se puede modificar`);
+  res.json(saveQuote(req.body, q.id));
+});
+
+quotes.post('/:id/cancel', (req, res) => {
+  const q = getQuote(req.params.id);
+  if (q.status !== 'pendiente') throw new HttpError(400, `El presupuesto ya está ${q.status}`);
+  db.prepare("UPDATE quotes SET status = 'anulado' WHERE id = ?").run(q.id);
   res.json({ ok: true });
 });
 
@@ -272,4 +381,4 @@ purchases.post('/:id/cancel', (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { sales, purchases, getSale, dateFilters };
+module.exports = { sales, purchases, quotes, getSale, getQuote, dateFilters, buildLines };

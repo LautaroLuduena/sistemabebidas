@@ -164,3 +164,48 @@ test('respaldo y restauración', async () => {
   // El usuario actual sigue pudiendo usar el sistema
   assert.equal((await call('GET', '/auth/status')).user.username, 'admin');
 });
+
+test('presupuestos: no mueven stock ni caja; al pasar a venta sí', async () => {
+  const beer = await call('GET', '/products/barcode/111');
+  const cashBefore = (await call('GET', '/cash')).balances;
+  const q = await call('POST', '/quotes', {
+    customer_name: 'Evento Pérez',
+    items: [{ product_id: beer.id, quantity: 5, unit_price: 1000 }],
+    discount: 500,
+    valid_days: 10,
+  });
+  assert.equal(q.total, 4500);
+  const detail = await call('GET', `/quotes/${q.id}`);
+  assert.equal(detail.customer_name, 'Evento Pérez');
+  assert.equal(detail.status, 'pendiente');
+  assert.ok(detail.valid_until);
+  assert.equal((await call('GET', `/products/${beer.id}`)).stock, beer.stock);
+  assert.deepEqual((await call('GET', '/cash')).balances, cashBefore);
+
+  // Editar
+  await call('PUT', `/quotes/${q.id}`, { items: [{ product_id: beer.id, quantity: 6, unit_price: 1000 }] });
+  assert.equal((await call('GET', `/quotes/${q.id}`)).total, 6000);
+
+  // Imprimir
+  const res = await fetch(`${base}/quotes/${q.id}/print`, { headers: { Cookie: cookie } });
+  assert.match(await res.text(), /PRESUPUESTO N° 0*\d+/);
+
+  // Pasar a venta
+  const sale = await call('POST', '/sales', {
+    quote_id: q.id,
+    items: [{ product_id: beer.id, quantity: 6, unit_price: 1000 }],
+    paid_cash: 6000,
+  });
+  const after = await call('GET', `/quotes/${q.id}`);
+  assert.equal(after.status, 'vendido');
+  assert.equal(after.sale_id, sale.id);
+  assert.equal((await call('GET', `/products/${beer.id}`)).stock, beer.stock - 6);
+  await assert.rejects(call('POST', '/sales', { quote_id: q.id, items: [{ product_id: beer.id, quantity: 1 }], paid_cash: 9999 }), /vendido/);
+  await assert.rejects(call('PUT', `/quotes/${q.id}`, { items: [{ product_id: beer.id, quantity: 1 }] }), /vendido/);
+
+  // Anular la venta deja el presupuesto pendiente otra vez
+  await call('POST', `/sales/${sale.id}/cancel`);
+  assert.equal((await call('GET', `/quotes/${q.id}`)).status, 'pendiente');
+  await call('POST', `/quotes/${q.id}/cancel`);
+  assert.equal((await call('GET', '/quotes?status=anulado')).length, 1);
+});

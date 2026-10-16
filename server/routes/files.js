@@ -5,7 +5,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { db, round2, UPLOADS_DIR } = require('../db');
 const { HttpError, getPriceList, priceFor, getSetting, addStock } = require('../services');
-const { getSale } = require('./operations');
+const { getSale, getQuote } = require('./operations');
 
 const router = express.Router();
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -499,6 +499,48 @@ router.get('/sales/:id/ticket', (req, res) => {
       <tr><td><b>TOTAL</b></td><td class="n"><b>${money(s.total)}</b></td></tr>${pay}</table>
     ${s.notes ? `<p><b>Notas:</b> ${esc(s.notes)}</p>` : ''}
     <p class="muted" style="margin-top:24px">Documento no válido como factura.</p>
+    </body></html>`);
+});
+
+// ---------------- Presupuesto ----------------
+const fmtDate = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
+
+router.get('/quotes/:id/print', (req, res) => {
+  const q = getQuote(req.params.id);
+  const photos = req.query.photos === '1';
+  const business = getSetting('business_name') || '';
+  const contact = [getSetting('business_address'), getSetting('business_phone'), getSetting('business_tax_id')].filter(Boolean).join(' · ');
+  const conditions = getSetting('quote_footer');
+  const items = q.items
+    .map(
+      (i) => `<tr>${photos ? `<td>${i.image ? `<img class="ph" src="/uploads/${esc(i.image)}">` : ''}</td>` : ''}
+        <td>${esc(i.description)}</td><td class="n">${i.quantity}</td><td class="n">${money(i.unit_price)}</td><td class="n">${money(i.subtotal)}</td></tr>`
+    )
+    .join('');
+  const status =
+    q.status === 'anulado'
+      ? '<div style="color:#b91c1c;font-weight:bold">ANULADO</div>'
+      : q.status === 'vendido'
+        ? `<div style="color:#15803d;font-weight:bold">CONVERTIDO EN VENTA #${q.sale_id}</div>`
+        : '';
+  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Presupuesto #${q.id}</title><style>${PRINT_CSS} body{max-width:760px}</style></head><body>
+    <div class="noprint"><button onclick="print()">🖨️ Imprimir / Guardar como PDF</button>
+      <a href="?${photos ? '' : 'photos=1'}" style="margin-left:12px">${photos ? 'Ocultar fotos' : 'Mostrar fotos'}</a></div>
+    <div class="head"><div><h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
+      <div style="text-align:right"><b style="font-size:16px">PRESUPUESTO N° ${String(q.id).padStart(6, '0')}</b>
+      <div class="muted">Fecha: ${fmtDate(q.date)}</div>
+      ${q.valid_until ? `<div class="muted">Válido hasta: <b>${fmtDate(q.valid_until)}</b></div>` : ''}${status}</div></div>
+    <p><b>Cliente:</b> ${esc(q.customer_name || 'Consumidor final')} ${q.customer_tax_id ? '· ' + esc(q.customer_tax_id) : ''}
+      ${q.customer_address ? '<br><b>Dirección:</b> ' + esc(q.customer_address) : ''}
+      ${q.customer_phone ? '<br><b>Teléfono:</b> ' + esc(q.customer_phone) : ''}</p>
+    <table><thead><tr>${photos ? '<th></th>' : ''}<th>Producto</th><th class="n">Cant.</th><th class="n">P. unit.</th><th class="n">Subtotal</th></tr></thead><tbody>${items}</tbody></table>
+    <table class="totals" style="width:300px;margin-left:auto;margin-top:12px">
+      <tr><td>Subtotal</td><td class="n">${money(q.subtotal)}</td></tr>
+      ${q.discount ? `<tr><td>Descuento</td><td class="n">-${money(q.discount)}</td></tr>` : ''}
+      <tr><td><b style="font-size:15px">TOTAL</b></td><td class="n"><b style="font-size:15px">${money(q.total)}</b></td></tr></table>
+    ${q.notes ? `<p><b>Observaciones:</b> ${esc(q.notes)}</p>` : ''}
+    ${conditions ? `<p class="muted" style="margin-top:16px;white-space:pre-line">${esc(conditions)}</p>` : ''}
+    <p class="muted" style="margin-top:24px">Presupuesto sin valor fiscal. Precios sujetos a disponibilidad de stock.</p>
     </body></html>`);
 });
 

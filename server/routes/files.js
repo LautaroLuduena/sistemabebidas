@@ -4,7 +4,7 @@ const fs = require('fs');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { db, round2, UPLOADS_DIR } = require('../db');
-const { HttpError, getPriceList, priceFor, getSetting, addStock } = require('../services');
+const { HttpError, getPriceList, priceFor, getSetting, addStock, logoFile } = require('../services');
 const { getSale, getQuote } = require('./operations');
 const pdf = require('../pdf');
 
@@ -409,8 +409,7 @@ router.get('/price-lists/:id/export.xlsx', async (req, res) => {
 });
 
 const logoTag = () => {
-  const logo = getSetting('logo');
-  return logo ? `<img src="/api/logo" style="max-height:60px;max-width:160px;display:block;margin-bottom:4px">` : '';
+  return logoFile() ? `<img src="/api/logo" style="max-height:60px;max-width:160px;display:block;margin-bottom:4px">` : '';
 };
 
 const PRINT_CSS = `

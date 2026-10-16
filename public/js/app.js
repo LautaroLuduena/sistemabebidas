@@ -1714,11 +1714,11 @@ views.config = {
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="cfgSave">Guardar</button></div></div>
       <div class="card" style="max-width:720px"><h2>🖼️ Logo</h2>
-        <p class="muted">Aparece en el menú, en la pantalla de ingreso, en presupuestos, comprobantes y listas de precios. PNG o JPG.</p>
+        <p class="muted">Aparece en el menú, en la pantalla de ingreso, en presupuestos, comprobantes y listas de precios. PNG o JPG. Si no subís ninguno, se usa el logo de ETL Bebidas.</p>
         <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <div class="img-preview" id="logoPreview" style="width:180px;height:100px">${s.logo ? `<img src="/api/logo?v=${esc(s.logo)}">` : '<span class="muted" style="font-size:13px">Sin logo</span>'}</div>
+          <div class="img-preview" id="logoPreview" style="width:180px;height:100px;background:#fff"><img src="/api/logo?v=${esc(s.logo || 'default')}"></div>
           <div class="toolbar" style="margin:0"><label class="btn primary">⬆️ Subir logo<input type="file" id="logoFile" accept="image/png,image/jpeg" hidden></label>
-          ${s.logo ? '<button class="btn danger" id="logoDel">Quitar</button>' : ''}</div>
+          ${s.logo ? '<button class="btn danger" id="logoDel">Volver al logo original</button>' : ''}</div>
         </div></div>
       <div class="card" style="max-width:720px"><h2>👤 Usuarios</h2>
         <p class="muted">Personas que pueden entrar al sistema.</p>
@@ -1809,10 +1809,11 @@ views.config = {
 async function loadBrand() {
   try {
     const b = await api('/branding');
-    const name = b.business_name || 'Distrimax';
+    const name = b.business_name || 'ETL Bebidas';
     $('#brandName').textContent = name;
     document.title = name;
-    $('#brandLogo').innerHTML = b.has_logo ? `<img src="/api/logo?t=${Date.now()}" alt="">` : '🥤';
+    $('#brandLogo').innerHTML = b.has_logo ? `<img src="/api/logo?t=${Date.now()}" alt="${esc(name)}">` : '🥤';
+    $('.sidebar .brand').classList.toggle('has-logo', Boolean(b.has_logo));
     return b;
   } catch {
     return {};
@@ -1856,7 +1857,7 @@ function showAuth(mode) {
     <button class="btn primary lg" style="width:100%;justify-content:center">${setup ? 'Crear usuario y entrar' : 'Entrar'}</button></form>`;
   document.body.appendChild(el);
   loadBrand().then((b) => {
-    if (b.has_logo) $('#authLogo', el).innerHTML = '<img src="/api/logo" alt="" style="max-height:80px;max-width:220px">';
+    if (b.has_logo) $('#authLogo', el).innerHTML = '<img src="/api/logo" alt="" style="max-height:120px;max-width:260px">';
   });
   $('input', el).focus();
   $('form', el).onsubmit = async (e) => {

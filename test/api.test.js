@@ -221,5 +221,5 @@ test('PDF reales de presupuesto, venta y lista de precios', async () => {
     const buf = Buffer.from(await res.arrayBuffer());
     assert.equal(buf.subarray(0, 5).toString(), '%PDF-', url);
   }
-  assert.equal((await call('GET', '/branding')).business_name, 'Distrimax');
+  assert.equal((await call('GET', '/branding')).business_name, 'ETL Bebidas');
 });

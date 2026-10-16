@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const { UPLOADS_DIR } = require('./db');
-const { getSetting } = require('./services');
+const { getSetting, logoFile } = require('./services');
 
 const MARGIN = 40;
 const DARK = '#111111';
@@ -33,7 +33,7 @@ function business() {
     contact: [getSetting('business_address'), getSetting('business_phone'), getSetting('business_tax_id') && `CUIT ${getSetting('business_tax_id')}`]
       .filter(Boolean)
       .join('  ·  '),
-    logo: imagePath(getSetting('logo')),
+    logo: logoFile(),
   };
 }
 
@@ -54,8 +54,8 @@ function header(doc, title, rightLines = []) {
   let x = MARGIN;
   if (b.logo) {
     try {
-      doc.image(b.logo, MARGIN, top, { fit: [70, 55] });
-      x = MARGIN + 80;
+      doc.image(b.logo, MARGIN, top, { fit: [100, 56] });
+      x = MARGIN + 110;
     } catch {
       /* imagen inválida: se omite */
     }

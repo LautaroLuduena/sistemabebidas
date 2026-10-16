@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { db, round2, UPLOADS_DIR } = require('../db');
-const { boxBalances, getSetting, HttpError } = require('../services');
+const { boxBalances, getSetting, logoFile, HttpError } = require('../services');
 
 const router = express.Router();
 
@@ -119,12 +119,11 @@ router.delete('/settings/logo', (req, res) => {
 // Rutas públicas (sin sesión): nombre y logo para la pantalla de ingreso y los comprobantes
 const publicRouter = express.Router();
 publicRouter.get('/branding', (req, res) => {
-  res.json({ business_name: getSetting('business_name') || '', has_logo: Boolean(getSetting('logo')) });
+  res.json({ business_name: getSetting('business_name') || '', has_logo: Boolean(logoFile()) });
 });
 publicRouter.get('/logo', (req, res) => {
-  const logo = getSetting('logo');
-  const file = logo && path.join(UPLOADS_DIR, path.basename(logo));
-  if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'Sin logo' });
+  const file = logoFile();
+  if (!file) return res.status(404).json({ error: 'Sin logo' });
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(file);
 });

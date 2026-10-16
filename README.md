@@ -1,4 +1,4 @@
-# 🥤 Sistema Bebidas
+# 🥤 ETL Bebidas — Sistema de gestión
 
 Sistema de gestión para una distribuidora de bebidas **mayorista y minorista**: caja, ventas, compras, cuentas corrientes de clientes y proveedores, inventario con stock, catálogo con fotos y códigos de barras, y listas de precios descargables.
 

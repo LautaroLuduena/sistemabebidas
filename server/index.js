@@ -63,7 +63,7 @@ if (require.main === module) {
     console.warn('ATENCIÓN: no hay un volumen de Railway montado. Los datos se perderán en cada actualización. Agregá un volumen en /data.');
   }
   createApp().listen(PORT, '0.0.0.0', () => {
-    console.log(`\n  Sistema Bebidas funcionando en http://localhost:${PORT}\n`);
+    console.log(`\n  ETL Bebidas funcionando en http://localhost:${PORT}\n`);
   });
 }
 

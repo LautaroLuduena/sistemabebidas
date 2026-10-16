@@ -206,9 +206,11 @@ if (db.prepare('SELECT COUNT(*) n FROM price_lists').get().n === 0) {
   ins.run('Mayorista', 'Venta por bulto a comercios', 25, 0);
 }
 
-db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Distrimax')").run();
-// Instalaciones que todavía tienen el nombre de ejemplo pasan a llamarse Distrimax
-db.prepare("UPDATE settings SET value = 'Distrimax' WHERE key = 'business_name' AND value = 'Mi Distribuidora de Bebidas'").run();
+db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'ETL Bebidas')").run();
+// Instalaciones que todavía tienen un nombre provisorio pasan a llamarse ETL Bebidas
+db.prepare(
+  "UPDATE settings SET value = 'ETL Bebidas' WHERE key = 'business_name' AND value IN ('Mi Distribuidora de Bebidas', 'Distrimax')"
+).run();
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 

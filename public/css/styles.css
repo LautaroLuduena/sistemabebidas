@@ -4,15 +4,16 @@
   --text: #1e2533;
   --muted: #6b7385;
   --border: #e2e6ee;
-  --primary: #2563eb;
-  --primary-soft: #e8efff;
+  --primary: #123c8c;
+  --primary-soft: #e6ecf8;
+  --accent: #f57c00;
   --ok: #15803d;
   --ok-soft: #e6f6ec;
   --warn: #b45309;
   --warn-soft: #fdf3e2;
   --danger: #b91c1c;
   --danger-soft: #fdeaea;
-  --sidebar: #141a2a;
+  --sidebar: #0b1f45;
   --sidebar-text: #c6cbd8;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
@@ -29,8 +30,12 @@ a { color: var(--primary); }
 .sidebar nav { padding: 8px; display: flex; flex-direction: column; }
 .sidebar nav a { color: var(--sidebar-text); text-decoration: none; padding: 8px 10px; border-radius: 8px; }
 .sidebar nav a:hover { background: rgba(255,255,255,.07); color: #fff; }
-.sidebar nav a.active { background: var(--primary); color: #fff; }
+.sidebar nav a.active { background: var(--accent); color: #fff; }
 #brandLogo img { max-height: 36px; max-width: 70px; background: #fff; border-radius: 6px; padding: 2px; display: block; }
+.brand.has-logo { justify-content: center; }
+.brand.has-logo #brandName { display: none; }
+.brand.has-logo #brandLogo { background: #fff; border-radius: 10px; padding: 6px 10px; width: 100%; display: flex; justify-content: center; }
+.brand.has-logo #brandLogo img { max-height: 90px; max-width: 100%; padding: 0; }
 .nav-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #7d8599; padding: 14px 10px 4px; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -60,7 +65,7 @@ main#view { padding: 20px; max-width: 1400px; width: 100%; }
 .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; white-space: nowrap; }
 .btn:hover { background: #f0f2f7; }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-.btn.primary:hover { background: #1d4fd8; }
+.btn.primary:hover { background: #0e2f70; }
 .btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
 .btn.danger { color: var(--danger); }
 .btn.sm { padding: 4px 8px; font-size: 12px; }

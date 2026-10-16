@@ -1,4 +1,6 @@
-const { db, round2 } = require('./db');
+const path = require('path');
+const fs = require('fs');
+const { db, round2, UPLOADS_DIR } = require('./db');
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -12,6 +14,18 @@ const BOXES = ['efectivo', 'transferencia'];
 function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : null;
+}
+
+const DEFAULT_LOGO = path.join(__dirname, '..', 'public', 'img', 'logo.jpg');
+
+/** Archivo del logo: el subido en Configuración, o el logo de ETL Bebidas incluido en el sistema. */
+function logoFile() {
+  const uploaded = getSetting('logo');
+  if (uploaded) {
+    const f = path.join(UPLOADS_DIR, path.basename(uploaded));
+    if (fs.existsSync(f)) return f;
+  }
+  return fs.existsSync(DEFAULT_LOGO) ? DEFAULT_LOGO : null;
 }
 
 function defaultPriceListId() {
@@ -93,6 +107,7 @@ module.exports = {
   HttpError,
   BOXES,
   getSetting,
+  logoFile,
   defaultPriceListId,
   getPriceList,
   priceFor,

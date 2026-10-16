@@ -6,6 +6,7 @@ const ExcelJS = require('exceljs');
 const { db, round2, UPLOADS_DIR } = require('../db');
 const { HttpError, getPriceList, priceFor, getSetting, addStock } = require('../services');
 const { getSale, getQuote } = require('./operations');
+const pdf = require('../pdf');
 
 const router = express.Router();
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -407,6 +408,11 @@ router.get('/price-lists/:id/export.xlsx', async (req, res) => {
   await sendWorkbook(res, wb, `lista_${normKey(list.name)}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 });
 
+const logoTag = () => {
+  const logo = getSetting('logo');
+  return logo ? `<img src="/api/logo" style="max-height:60px;max-width:160px;display:block;margin-bottom:4px">` : '';
+};
+
 const PRINT_CSS = `
   *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px;font-size:12px}
   h1{font-size:20px;margin:0} .muted{color:#555} .head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px}
@@ -419,6 +425,19 @@ const PRINT_CSS = `
   .card img{width:100%;height:110px;object-fit:contain} .card .p{font-size:15px;font-weight:bold;margin-top:4px}
   .totals td{border:none} @media print{.noprint{display:none} body{margin:8mm}}
 `;
+
+router.get('/price-lists/:id/export.pdf', (req, res) => {
+  const list = resolveList(req);
+  const rows = priceListRows(list, req.query);
+  const customer = req.query.customer_id ? db.prepare('SELECT name FROM customers WHERE id = ?').get(req.query.customer_id) : null;
+  const layout = req.query.layout === 'catalogo' ? 'catalogo' : 'lista';
+  pdf.priceListPdf(res, list, rows, {
+    photos: req.query.photos === '1',
+    layout,
+    customerName: customer && customer.name,
+    filename: `${layout === 'catalogo' ? 'catalogo' : 'lista'}_${normKey(customer ? customer.name : list.name)}_${new Date().toISOString().slice(0, 10)}.pdf`,
+  });
+});
 
 router.get('/price-lists/:id/print', (req, res) => {
   const list = resolveList(req);
@@ -462,7 +481,7 @@ router.get('/price-lists/:id/print', (req, res) => {
   const footer = getSetting('price_list_footer');
   res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Lista ${esc(list.name)}</title><style>${PRINT_CSS}</style></head><body>
     <div class="noprint"><button onclick="print()">🖨️ Imprimir / Guardar como PDF</button></div>
-    <div class="head"><div><h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
+    <div class="head"><div>${logoTag()}<h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
       <div style="text-align:right"><b>Lista de precios: ${esc(list.name)}</b>${customer ? `<div>Cliente: ${esc(customer.name)}</div>` : ''}
       <div class="muted">${new Date().toLocaleDateString('es-AR')} · ${rows.length} productos</div></div></div>
     ${body}
@@ -487,7 +506,7 @@ router.get('/sales/:id/ticket', (req, res) => {
   ].join('');
   res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Venta #${s.id}</title><style>${PRINT_CSS} body{max-width:720px}</style></head><body>
     <div class="noprint"><button onclick="print()">🖨️ Imprimir</button></div>
-    <div class="head"><div><h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
+    <div class="head"><div>${logoTag()}<h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
       <div style="text-align:right"><b>Comprobante de venta #${s.id}</b><div class="muted">${esc(s.date)}</div>
       ${s.status === 'anulada' ? '<div style="color:#b91c1c;font-weight:bold">ANULADA</div>' : ''}</div></div>
     <p><b>Cliente:</b> ${esc(s.customer_name || 'Consumidor final')} ${s.customer_tax_id ? '· ' + esc(s.customer_tax_id) : ''}
@@ -502,7 +521,10 @@ router.get('/sales/:id/ticket', (req, res) => {
     </body></html>`);
 });
 
+router.get('/sales/:id/pdf', (req, res) => pdf.salePdf(res, getSale(req.params.id)));
+
 // ---------------- Presupuesto ----------------
+router.get('/quotes/:id/pdf', (req, res) => pdf.quotePdf(res, getQuote(req.params.id), { photos: req.query.photos === '1' }));
 const fmtDate = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
 
 router.get('/quotes/:id/print', (req, res) => {
@@ -526,7 +548,7 @@ router.get('/quotes/:id/print', (req, res) => {
   res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Presupuesto #${q.id}</title><style>${PRINT_CSS} body{max-width:760px}</style></head><body>
     <div class="noprint"><button onclick="print()">🖨️ Imprimir / Guardar como PDF</button>
       <a href="?${photos ? '' : 'photos=1'}" style="margin-left:12px">${photos ? 'Ocultar fotos' : 'Mostrar fotos'}</a></div>
-    <div class="head"><div><h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
+    <div class="head"><div>${logoTag()}<h1>${esc(business)}</h1><div class="muted">${esc(contact)}</div></div>
       <div style="text-align:right"><b style="font-size:16px">PRESUPUESTO N° ${String(q.id).padStart(6, '0')}</b>
       <div class="muted">Fecha: ${fmtDate(q.date)}</div>
       ${q.valid_until ? `<div class="muted">Válido hasta: <b>${fmtDate(q.valid_until)}</b></div>` : ''}${status}</div></div>

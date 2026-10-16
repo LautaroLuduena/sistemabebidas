@@ -27,6 +27,7 @@ function createApp() {
   const api = express.Router();
   api.get('/health', (req, res) => res.json({ ok: true }));
   api.use(auth.router); // login / setup (sin sesión)
+  api.use(reports.publicRouter); // nombre y logo del negocio (sin sesión)
   api.use(auth.requireAuth);
   api.use('/users', auth.users);
   api.use(backup);

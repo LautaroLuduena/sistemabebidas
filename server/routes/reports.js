@@ -1,6 +1,9 @@
 const express = require('express');
-const { db, round2 } = require('../db');
-const { boxBalances } = require('../services');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const { db, round2, UPLOADS_DIR } = require('../db');
+const { boxBalances, getSetting, HttpError } = require('../services');
 
 const router = express.Router();
 
@@ -81,4 +84,50 @@ router.put('/settings', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Logo del negocio ----------
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOADS_DIR,
+    filename: (req, file, cb) => cb(null, `logo_${Date.now()}${file.mimetype === 'image/png' ? '.png' : '.jpg'}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|png)$/.test(file.mimetype)) cb(null, true);
+    else cb(new HttpError(400, 'El logo tiene que ser una imagen PNG o JPG'));
+  },
+});
+
+const setLogo = (filename) => {
+  const old = getSetting('logo');
+  db.prepare("INSERT INTO settings (key, value) VALUES ('logo', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(filename);
+  if (old && old !== filename) fs.promises.unlink(path.join(UPLOADS_DIR, path.basename(old))).catch(() => {});
+};
+
+router.post('/settings/logo', logoUpload.single('logo'), (req, res) => {
+  if (!req.file) throw new HttpError(400, 'Elegí la imagen del logo');
+  setLogo(req.file.filename);
+  res.json({ ok: true });
+});
+
+router.delete('/settings/logo', (req, res) => {
+  const old = getSetting('logo');
+  db.prepare("DELETE FROM settings WHERE key = 'logo'").run();
+  if (old) fs.promises.unlink(path.join(UPLOADS_DIR, path.basename(old))).catch(() => {});
+  res.json({ ok: true });
+});
+
+// Rutas públicas (sin sesión): nombre y logo para la pantalla de ingreso y los comprobantes
+const publicRouter = express.Router();
+publicRouter.get('/branding', (req, res) => {
+  res.json({ business_name: getSetting('business_name') || '', has_logo: Boolean(getSetting('logo')) });
+});
+publicRouter.get('/logo', (req, res) => {
+  const logo = getSetting('logo');
+  const file = logo && path.join(UPLOADS_DIR, path.basename(logo));
+  if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'Sin logo' });
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(file);
+});
+
 module.exports = router;
+module.exports.publicRouter = publicRouter;

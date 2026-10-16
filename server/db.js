@@ -206,7 +206,9 @@ if (db.prepare('SELECT COUNT(*) n FROM price_lists').get().n === 0) {
   ins.run('Mayorista', 'Venta por bulto a comercios', 25, 0);
 }
 
-db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Mi Distribuidora de Bebidas')").run();
+db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('business_name', 'Distrimax')").run();
+// Instalaciones que todavía tienen el nombre de ejemplo pasan a llamarse Distrimax
+db.prepare("UPDATE settings SET value = 'Distrimax' WHERE key = 'business_name' AND value = 'Mi Distribuidora de Bebidas'").run();
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 

@@ -209,3 +209,17 @@ test('presupuestos: no mueven stock ni caja; al pasar a venta sí', async () => 
   await call('POST', `/quotes/${q.id}/cancel`);
   assert.equal((await call('GET', '/quotes?status=anulado')).length, 1);
 });
+
+test('PDF reales de presupuesto, venta y lista de precios', async () => {
+  const lists = await call('GET', '/price-lists');
+  const quotes = await call('GET', '/quotes');
+  const sales = await call('GET', '/sales');
+  for (const url of [`/quotes/${quotes[0].id}/pdf`, `/sales/${sales[0].id}/pdf`, `/price-lists/${lists[0].id}/export.pdf`, `/price-lists/${lists[0].id}/export.pdf?layout=catalogo`]) {
+    const res = await fetch(base + url, { headers: { Cookie: cookie } });
+    assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('content-type'), 'application/pdf');
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.equal(buf.subarray(0, 5).toString(), '%PDF-', url);
+  }
+  assert.equal((await call('GET', '/branding')).business_name, 'Distrimax');
+});

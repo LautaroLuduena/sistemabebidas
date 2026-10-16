@@ -152,6 +152,16 @@ function formData(el) {
   return out;
 }
 
+/** Descarga un archivo del servidor (PDF, Excel) sin abrir otra pestaña */
+function download(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 const field = (label, input, cls = '') => `<div class="field ${cls}"><label>${esc(label)}</label>${input}</div>`;
 const opt = (value, label, selected) =>
   `<option value="${esc(value)}" ${String(value) === String(selected ?? '') ? 'selected' : ''}>${esc(label)}</option>`;
@@ -529,7 +539,8 @@ views.vender = {
           ${r.change ? `<p class="total-box pos" style="font-size:22px">Vuelto: ${money(r.change)}</p>` : ''}
           ${r.on_account ? `<p>Quedó en cuenta corriente: <b>${money(r.on_account)}</b></p>` : ''}`,
         actions: [
-          { label: '🖨️ Comprobante', onClick: () => { window.open(`/api/sales/${r.id}/ticket`, '_blank'); return false; } },
+          { label: '⬇️ PDF', onClick: () => { download(`/api/sales/${r.id}/pdf`); return false; } },
+          { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/sales/${r.id}/ticket`, '_blank'); return false; } },
           { label: 'Nueva venta', cls: 'primary' },
         ],
       });
@@ -572,7 +583,8 @@ views.vender = {
                 title: `Presupuesto #${r.id} guardado`,
                 body: `<div class="total-box">${money(r.total)}</div><p class="muted">Lo encontrás en <a href="#/presupuestos">Presupuestos</a> para imprimirlo o pasarlo a venta.</p>`,
                 actions: [
-                  { label: '🖨️ Imprimir / PDF', onClick: () => { window.open(`/api/quotes/${r.id}/print`, '_blank'); return false; } },
+                  { label: '⬇️ Descargar PDF', onClick: () => { download(`/api/quotes/${r.id}/pdf`); return false; } },
+                  { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/quotes/${r.id}/print`, '_blank'); return false; } },
                   { label: 'Listo', cls: 'primary' },
                 ],
               });
@@ -656,7 +668,8 @@ views.presupuestos = {
             .map(
               (q) => `<tr><td>${q.id}</td><td>${esc(q.date)}</td><td>${esc(q.customer_name || 'Consumidor final')}</td><td>${esc(q.price_list_name || '')}</td>
           <td class="n"><b>${money(q.total)}</b></td><td>${esc(q.valid_until ? q.valid_until.split('-').reverse().join('/') : '')}</td><td>${badge(q)}</td>
-          <td class="actions"><a class="btn sm" href="/api/quotes/${q.id}/print" target="_blank">🖨️ Imprimir</a>
+          <td class="actions"><a class="btn sm" href="/api/quotes/${q.id}/pdf" download>⬇️ PDF</a>
+            <a class="btn sm" href="/api/quotes/${q.id}/print" target="_blank" title="Imprimir">🖨️</a>
             ${q.status === 'pendiente' ? `<button class="btn sm ok" data-open="${q.id}">🛒 Vender / editar</button>` : ''}
             <button class="btn sm" data-dup="${q.id}" title="Crear un presupuesto nuevo a partir de este">📋 Duplicar</button>
             ${q.status === 'pendiente' ? `<button class="btn sm danger" data-cancel="${q.id}">Anular</button>` : ''}</td></tr>`
@@ -715,7 +728,8 @@ views.ventas = {
           <td class="n"><b>${money(s.total)}</b></td><td class="n">${money(s.paid_cash)}</td><td class="n">${money(s.paid_transfer)}</td><td class="n">${money(s.on_account)}</td>
           <td>${s.status === 'ok' ? '<span class="badge ok">OK</span>' : '<span class="badge danger">Anulada</span>'}</td>
           <td class="actions"><button class="btn sm" data-view="${s.id}">Ver</button>
-            <a class="btn sm" href="/api/sales/${s.id}/ticket" target="_blank">🖨️</a>
+            <a class="btn sm" href="/api/sales/${s.id}/pdf" download title="Descargar PDF">⬇️ PDF</a>
+            <a class="btn sm" href="/api/sales/${s.id}/ticket" target="_blank" title="Imprimir">🖨️</a>
             ${s.status === 'ok' ? `<button class="btn sm danger" data-cancel="${s.id}">Anular</button>` : ''}</td></tr>`
             )
             .join('')
@@ -740,7 +754,11 @@ views.ventas = {
               <div class="summary-row muted"><span>Transferencia</span><span>${money(s.paid_transfer)}</span></div>
               <div class="summary-row muted"><span>Cuenta corriente</span><span>${money(s.on_account)}</span></div></div>
             ${s.notes ? `<p><b>Notas:</b> ${esc(s.notes)}</p>` : ''}`,
-          actions: [{ label: '🖨️ Comprobante', onClick: () => { window.open(`/api/sales/${s.id}/ticket`, '_blank'); return false; } }, { label: 'Cerrar', cls: 'primary' }],
+          actions: [
+            { label: '⬇️ PDF', onClick: () => { download(`/api/sales/${s.id}/pdf`); return false; } },
+            { label: '🖨️ Imprimir', onClick: () => { window.open(`/api/sales/${s.id}/ticket`, '_blank'); return false; } },
+            { label: 'Cerrar', cls: 'primary' },
+          ],
         });
       }
       const cid = e.target.dataset.cancel;
@@ -1178,7 +1196,7 @@ function partyViews({ key, endpoint, singular, plural, isCustomer }) {
       <div class="toolbar"><a class="btn" href="#/${key}">← Volver</a><span class="spacer"></span>
         <button class="btn primary" id="dPay">${isCustomer ? '💰 Registrar cobro' : '💸 Registrar pago'}</button>
         <button class="btn" id="dEdit">✏️ Editar</button>
-        ${isCustomer ? `<a class="btn" target="_blank" href="/api/price-lists/${listId}/print?customer_id=${p.id}">🏷️ Lista de precios (PDF)</a>
+        ${isCustomer ? `<a class="btn" download href="/api/price-lists/${listId}/export.pdf?customer_id=${p.id}">🏷️ Lista de precios (PDF)</a>
           <a class="btn" href="/api/price-lists/${listId}/export.xlsx?customer_id=${p.id}">📊 Lista Excel</a>` : ''}
       </div>
       <div class="grid cols-3">
@@ -1195,7 +1213,7 @@ function partyViews({ key, endpoint, singular, plural, isCustomer }) {
         <div class="card" style="padding:0"><h2 style="padding:16px 16px 0">${isCustomer ? '🧾 Últimas ventas' : '📋 Últimas compras'}</h2><div class="table-wrap"><table class="table">
           <thead><tr><th>#</th><th>Fecha</th><th class="n">Total</th><th class="n">A cuenta</th><th></th></tr></thead>
           <tbody>${ops.length ? ops.map((o) => `<tr><td>${o.id}</td><td>${esc(o.date)}</td><td class="n">${money(o.total)}</td><td class="n">${money(o.on_account)}</td>
-            <td>${o.status !== 'ok' ? '<span class="badge danger">Anulada</span>' : isCustomer ? `<a class="btn sm" target="_blank" href="/api/sales/${o.id}/ticket">🖨️</a>` : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">Sin operaciones</td></tr>'}</tbody></table></div></div>
+            <td>${o.status !== 'ok' ? '<span class="badge danger">Anulada</span>' : isCustomer ? `<a class="btn sm" download href="/api/sales/${o.id}/pdf">⬇️ PDF</a>` : ''}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">Sin operaciones</td></tr>'}</tbody></table></div></div>
       </div>`;
     const reload = () => renderDetail(view, id);
     $('#dPay').onclick = () => paymentForm(p, reload);
@@ -1523,22 +1541,24 @@ views.listas = {
           ${field('O según el cliente', `<select id="dCustomer"><option value="">—</option>${customers.map((c) => opt(c.id, `${c.name}${c.price_list_name ? ' (' + c.price_list_name + ')' : ''}`)).join('')}</select>`)}
           ${field('Categoría', `<select id="dCat"><option value="">Todas</option>${cats.map((c) => opt(c.id, c.name)).join('')}</select>`)}
           <div class="field"><label>Opciones</label><label class="check"><input type="checkbox" id="dStock"> Solo productos con stock</label>
-            <label class="check"><input type="checkbox" id="dPhotos"> Incluir fotos (PDF)</label></div>
+            <label class="check"><input type="checkbox" id="dPhotos"> Incluir fotos</label></div>
         </div>
         <div class="toolbar" style="margin-top:12px">
           <button class="btn primary" id="dXlsx">📊 Descargar Excel</button>
-          <button class="btn" id="dPdf">🖨️ Lista para imprimir / PDF</button>
+          <button class="btn primary" id="dPdf">📄 Descargar PDF</button>
           <button class="btn" id="dCatalog">🖼️ Catálogo con fotos (PDF)</button>
+          <button class="btn" id="dPrint">🖨️ Imprimir</button>
         </div>
-        <p class="muted">Para PDF: en la ventana que se abre elegí “Imprimir” → “Guardar como PDF”. Ideal para mandar por WhatsApp o email.</p>
+        <p class="muted">El PDF se descarga directo, listo para mandar por WhatsApp o email. Las fotos en PDF tienen que ser JPG o PNG.</p>
       </div>`;
     const params = (extra = {}) => {
       const q = new URLSearchParams({ category_id: $('#dCat').value, only_stock: $('#dStock').checked ? '1' : '', customer_id: $('#dCustomer').value, ...extra });
       return `${$('#dList').value}/__?${q}`;
     };
     $('#dXlsx').onclick = () => (location.href = '/api/price-lists/' + params().replace('__', 'export.xlsx'));
-    $('#dPdf').onclick = () => window.open('/api/price-lists/' + params({ photos: $('#dPhotos').checked ? '1' : '' }).replace('__', 'print'), '_blank');
-    $('#dCatalog').onclick = () => window.open('/api/price-lists/' + params({ layout: 'catalogo' }).replace('__', 'print'), '_blank');
+    $('#dPdf').onclick = () => download('/api/price-lists/' + params({ photos: $('#dPhotos').checked ? '1' : '' }).replace('__', 'export.pdf'));
+    $('#dCatalog').onclick = () => download('/api/price-lists/' + params({ layout: 'catalogo' }).replace('__', 'export.pdf'));
+    $('#dPrint').onclick = () => window.open('/api/price-lists/' + params({ photos: $('#dPhotos').checked ? '1' : '' }).replace('__', 'print'), '_blank');
 
     const reload = () => {
       cache.invalidate();
@@ -1693,6 +1713,13 @@ views.config = {
         ${field('Condiciones del presupuesto (aparecen al pie)', `<textarea name="quote_footer" rows="3" placeholder="Ej: Forma de pago: efectivo o transferencia. Entrega en 48 hs.">${esc(s.quote_footer)}</textarea>`, 'full')}
       </div>
       <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="cfgSave">Guardar</button></div></div>
+      <div class="card" style="max-width:720px"><h2>🖼️ Logo</h2>
+        <p class="muted">Aparece en el menú, en la pantalla de ingreso, en presupuestos, comprobantes y listas de precios. PNG o JPG.</p>
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <div class="img-preview" id="logoPreview" style="width:180px;height:100px">${s.logo ? `<img src="/api/logo?v=${esc(s.logo)}">` : '<span class="muted" style="font-size:13px">Sin logo</span>'}</div>
+          <div class="toolbar" style="margin:0"><label class="btn primary">⬆️ Subir logo<input type="file" id="logoFile" accept="image/png,image/jpeg" hidden></label>
+          ${s.logo ? '<button class="btn danger" id="logoDel">Quitar</button>' : ''}</div>
+        </div></div>
       <div class="card" style="max-width:720px"><h2>👤 Usuarios</h2>
         <p class="muted">Personas que pueden entrar al sistema.</p>
         <table class="table"><tbody id="usersBody"></tbody></table>
@@ -1754,6 +1781,22 @@ views.config = {
         $('#restoreGo').disabled = false;
       }
     });
+    $('#logoFile').onchange = safe(async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('logo', file);
+      await api('/settings/logo', { method: 'POST', form: fd });
+      toast('Logo actualizado', 'ok');
+      loadBrand();
+      views.config.render(view);
+    });
+    if ($('#logoDel'))
+      $('#logoDel').onclick = safe(async () => {
+        await api('/settings/logo', { method: 'DELETE' });
+        loadBrand();
+        views.config.render(view);
+      });
     $('#cfgSave').onclick = safe(async () => {
       await api('/settings', { method: 'PUT', body: formData($('#cfgForm')) });
       toast('Configuración guardada', 'ok');
@@ -1765,13 +1808,14 @@ views.config = {
 // ======================= Router =======================
 async function loadBrand() {
   try {
-    const s = await api('/settings');
-    if (s.business_name) {
-      $('#brandName').textContent = s.business_name;
-      document.title = s.business_name;
-    }
+    const b = await api('/branding');
+    const name = b.business_name || 'Distrimax';
+    $('#brandName').textContent = name;
+    document.title = name;
+    $('#brandLogo').innerHTML = b.has_logo ? `<img src="/api/logo?t=${Date.now()}" alt="">` : '🥤';
+    return b;
   } catch {
-    /* ignorar */
+    return {};
   }
 }
 
@@ -1802,7 +1846,7 @@ function showAuth(mode) {
   el.id = 'authScreen';
   el.className = 'auth-screen';
   el.innerHTML = `<form class="auth-card">
-    <div style="font-size:42px;text-align:center">🥤</div>
+    <div id="authLogo" style="font-size:42px;text-align:center">🥤</div>
     <h2 style="text-align:center;margin:4px 0 4px">${setup ? 'Bienvenido' : 'Iniciar sesión'}</h2>
     <p class="muted" style="text-align:center;margin-top:0">${setup ? 'Creá el usuario administrador para empezar a usar el sistema.' : 'Ingresá con tu usuario y contraseña.'}</p>
     ${field('Usuario', '<input name="username" autocomplete="username" required>')}
@@ -1811,6 +1855,9 @@ function showAuth(mode) {
     <div class="neg" id="authError" style="min-height:18px"></div>
     <button class="btn primary lg" style="width:100%;justify-content:center">${setup ? 'Crear usuario y entrar' : 'Entrar'}</button></form>`;
   document.body.appendChild(el);
+  loadBrand().then((b) => {
+    if (b.has_logo) $('#authLogo', el).innerHTML = '<img src="/api/logo" alt="" style="max-height:80px;max-width:220px">';
+  });
   $('input', el).focus();
   $('form', el).onsubmit = async (e) => {
     e.preventDefault();

@@ -745,7 +745,7 @@ async function closeOrder(id, onDone) {
 views.pedidos = {
   title: 'Pedidos web',
   async render(view) {
-    const [customers, settings] = await Promise.all([api('/customers?include_inactive=1'), api('/settings')]);
+    const [customers, settings, origins] = await Promise.all([api('/customers?include_inactive=1'), api('/settings'), api('/shop/origins')]);
     const from = new Date(Date.now() - 60 * 864e5).toLocaleDateString('sv-SE');
     view.innerHTML = `
       <div class="card" style="background:var(--primary-soft)">🛍️ Pedidos de la <b>tienda online</b>. Mientras están en curso, la mercadería queda <b>reservada</b>: no se puede vender a otro ni pedir desde la tienda.
@@ -755,6 +755,7 @@ views.pedidos = {
       <div class="toolbar" style="margin-top:16px">
         <select id="fStatus"><option value="activos">En curso</option>${Object.entries(ORDER_STATES).map(([k, [l]]) => opt(k, l)).join('')}<option value="">Todos</option></select>
         <select id="fCustomer"><option value="">Todos los clientes</option>${customers.map((c) => opt(c.id, c.name)).join('')}</select>
+        <select id="fOrigin"><option value="">Todos los orígenes</option>${origins.map((o) => opt(o, '📣 ' + o)).join('')}</select>
         <input type="date" id="fFrom" value="${from}"> <input type="date" id="fTo" value="${today()}">
       </div>
       <div class="card" style="padding:0"><div class="table-wrap"><table class="table">
@@ -762,7 +763,7 @@ views.pedidos = {
         <tbody id="oBody"></tbody></table></div></div>`;
     let rows = [];
     const load = safe(async () => {
-      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source: 'web' });
+      const qs = new URLSearchParams({ from: $('#fFrom').value, to: $('#fTo').value, customer_id: $('#fCustomer').value, status: $('#fStatus').value, source: 'web', origin: $('#fOrigin').value });
       rows = await api('/quotes?' + qs);
       refreshPendingOrders();
       const active = await api('/quotes?status=activos&source=web&limit=2000');
@@ -781,6 +782,7 @@ views.pedidos = {
                 : `<span class="badge ${cls}">${label}</span>${q.sale_id ? ` <span class="muted">Venta #${q.sale_id}</span>` : ''}`;
               return `<tr><td><b>${q.id}</b></td><td style="white-space:nowrap">${esc(q.date.slice(0, 16))}</td>
                 <td style="min-width:200px"><b>${esc(q.customer_name || 'Consumidor final')}</b>
+                  <div style="margin-top:2px">${q.contact_city ? `<span class="badge">📍 ${esc(q.contact_city)}</span> ` : ''}<span class="badge info" title="Por dónde llegó a la tienda">📣 ${esc(q.origin || 'directo')}</span></div>
                   ${q.contact_phone ? `<div class="muted" style="font-size:12px">📞 ${esc(q.contact_phone)}${q.contact_address ? ' · ' + esc(q.contact_address) : ''}</div>` : ''}
                   ${q.notes ? `<div class="muted" style="font-size:12px">📝 ${esc(q.notes)}</div>` : ''}</td>
                 <td class="n"><b>${money(q.total)}</b><div class="muted" style="font-size:12px">${q.items} productos</div></td>
@@ -797,7 +799,7 @@ views.pedidos = {
             .join('')
         : '<tr><td colspan="6" class="empty">No hay pedidos con esos filtros</td></tr>';
     });
-    ['#fFrom', '#fTo', '#fCustomer', '#fStatus'].forEach((sel) => ($(sel).onchange = load));
+    ['#fFrom', '#fTo', '#fCustomer', '#fStatus', '#fOrigin'].forEach((sel) => ($(sel).onchange = load));
     $('#oStats').onclick = (e) => {
       const t = e.target.closest('[data-filter]');
       if (!t) return;
@@ -1293,7 +1295,7 @@ views.reportes = {
         </div>
         <div class="grid cols-4" id="pStats"></div>
         <div class="tabs" id="pTabs" style="margin-top:12px">
-          ${[['products', 'Productos vendidos'], ['categories', 'Por categoría'], ['customers', 'Clientes'], ['suppliers', 'Compras por proveedor'], ['purchased', 'Productos comprados'], ['expenses', 'Gastos']]
+          ${[['products', 'Productos vendidos'], ['categories', 'Por categoría'], ['customers', 'Clientes'], ['suppliers', 'Compras por proveedor'], ['purchased', 'Productos comprados'], ['expenses', 'Gastos'], ['web_origins', '📣 Tienda: canales'], ['web_cities', '📍 Tienda: localidades']]
             .map(([k, l]) => `<button data-tab="${k}" class="${st.tab === k ? 'active' : ''}">${l}</button>`)
             .join('')}
         </div>
@@ -1344,17 +1346,28 @@ views.reportes = {
       suppliers: { cols: [['Proveedor', 'name'], ['Compras', 'n', 'q'], ['Total', 'total', '$']] },
       purchased: { cols: [['Producto', 'name'], ['Cantidad', 'qty', 'q'], ['Costo promedio', 'avg_cost', '$'], ['Total', 'total', '$']] },
       expenses: { cols: [['Concepto', 'name'], ['Veces', 'n', 'q'], ['Total', 'total', '$']] },
+      web_origins: {
+        cols: [['Canal (origen)', 'name'], ['Visitas', 'visits', 'q'], ['Pedidos', 'orders', 'q'], ['Conversión', 'conversion', '%'], ['Monto pedido', 'ordered', '$'],
+          ['Vendidos', 'sold', 'q'], ['Monto vendido', 'sold_total', '$'], ['Cancelados', 'cancelled', 'q']],
+        note: 'Visitas = veces que se abrió la tienda desde ese link. Conversión = pedidos / visitas. "Vendidos" = pedidos cobrados y cerrados.',
+      },
+      web_cities: {
+        cols: [['Localidad', 'name'], ['Pedidos', 'orders', 'q'], ['Monto pedido', 'ordered', '$'], ['Vendidos', 'sold', 'q'], ['Monto vendido', 'sold_total', '$']],
+        note: 'Localidad que escribió el cliente al hacer el pedido en la tienda.',
+      },
     };
     let detail = null;
     const renderTab = () => {
       const t = TABLES[st.tab];
       const rows = detail[st.tab];
       $$('#pTabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === st.tab));
-      const cell = (r, [, k, f]) => `<td class="${f ? 'n' : ''}">${f === '$' ? money(r[k]) : f === 'q' ? qty(r[k] || 0) : esc(r[k] || '')}</td>`;
+      const cell = (r, [, k, f]) =>
+        `<td class="${f ? 'n' : ''}">${f === '$' ? money(r[k]) : f === 'q' ? qty(r[k] || 0) : f === '%' ? (r[k] === null || r[k] === undefined ? '—' : r[k] + '%') : esc(r[k] || '')}</td>`;
       $('#pBody').innerHTML = rows.length
         ? `<table class="table"><thead><tr>${t.cols.map(([l, , f]) => `<th class="${f ? 'n' : ''}">${l}</th>`).join('')}</tr></thead>
-          <tbody>${rows.map((r) => `<tr>${t.cols.map((c) => cell(r, c)).join('')}</tr>`).join('')}</tbody></table>`
-        : '<div class="empty">Sin datos en este período</div>';
+          <tbody>${rows.map((r) => `<tr>${t.cols.map((c) => cell(r, c)).join('')}</tr>`).join('')}</tbody></table>
+          ${t.note ? `<p class="muted" style="font-size:12px">${t.note}</p>` : ''}`
+        : `<div class="empty">Sin datos en este período</div>${t.note ? `<p class="muted" style="font-size:12px">${t.note}</p>` : ''}`;
     };
     const loadPeriod = safe(async () => {
       detail = await api(`/reports/period?from=${st.pFrom}&to=${st.pTo}`);
@@ -1841,6 +1854,7 @@ function partyViews({ key, endpoint, singular, plural, isCustomer }) {
         ${field('Teléfono', `<input name="phone" value="${esc(p.phone)}">`)}
         ${field('Email', `<input name="email" type="email" value="${esc(p.email)}">`)}
         ${field('Dirección', `<input name="address" value="${esc(p.address)}">`)}
+        ${field('Localidad', `<input name="city" value="${esc(p.city)}" placeholder="Ej: Córdoba Capital">`)}
         ${isCustomer ? field('Lista de precios', `<select name="price_list_id"><option value="">(la predeterminada)</option>${lists.map((l) => opt(l.id, l.name, p.price_list_id)).join('')}</select>`) : ''}
         ${isCustomer ? field('Límite de crédito (0 = sin límite)', `<input name="credit_limit" value="${p.credit_limit || ''}">`) : ''}
         ${!party ? field(isCustomer ? 'Saldo inicial que nos debe' : 'Saldo inicial que le debemos', '<input name="opening_balance" placeholder="0">') : ''}
@@ -2543,6 +2557,22 @@ views.config = {
         </div>
         <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="shopSave">Guardar tienda</button>
           <span class="spacer"></span><input id="shopPublicUrl" readonly value="${esc(location.origin + '/tienda')}" style="min-width:220px"><button class="btn" id="shopCopy">📋 Copiar link</button><a class="btn" href="/tienda" target="_blank">Abrir</a></div>
+        <h3 style="font-size:14px;margin:16px 0 6px">📣 Links con seguimiento (para saber de dónde vienen los pedidos)</h3>
+        <p class="muted" style="margin-top:0;font-size:13px">Usá un link distinto en cada lugar. Las visitas y pedidos de cada uno se ven en <b>Reportes → Detalle del período → Tienda: canales</b>.</p>
+        <table class="table" id="trackLinks"><tbody>
+          ${[
+            ['whatsapp', 'Mensaje de bienvenida / ausencia de WhatsApp (incluye los anuncios que abren WhatsApp)'],
+            ['instagram', 'Bio de Instagram'],
+            ['historias', 'Historias de Instagram (sticker de enlace)'],
+            ['anuncio-ig', 'Anuncios de Instagram/Facebook con destino sitio web'],
+            ['facebook', 'Página de Facebook'],
+          ]
+            .map(([o, d]) => `<tr><td style="width:40%"><b>${esc(d)}</b></td><td><input readonly value="${esc(location.origin + '/tienda?origen=' + o)}" style="width:100%"></td>
+              <td class="actions"><button type="button" class="btn sm" data-copy="${esc(location.origin + '/tienda?origen=' + o)}">📋 Copiar</button></td></tr>`)
+            .join('')}
+          <tr><td><input id="customOrigin" placeholder="Otro: ej. volante, flyer, google"></td><td><input id="customLink" readonly style="width:100%"></td>
+            <td class="actions"><button type="button" class="btn sm" id="copyCustom">📋 Copiar</button></td></tr>
+        </tbody></table>
         <p class="muted" style="margin-bottom:0">Los <b>precios mayoristas</b> conviene darlos con el link personal de cada cliente: entrá al cliente y tocá <b>🔗 Link de pedidos</b>. Ese link muestra la lista de precios asignada a ese cliente.</p>
       </div>
       <div class="card" style="max-width:720px"><h2>🖼️ Logo</h2>
@@ -2622,6 +2652,26 @@ views.config = {
       await api('/settings', { method: 'PUT', body: f });
       toast(f.shop_enabled === '1' ? 'Tienda guardada y activada' : 'Tienda guardada (desactivada)', 'ok');
     });
+    const copyText = async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const t = document.createElement('textarea');
+        t.value = text;
+        document.body.appendChild(t);
+        t.select();
+        document.execCommand('copy');
+        t.remove();
+      }
+      toast('Link copiado', 'ok');
+    };
+    $('#trackLinks').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-copy]');
+      if (b) copyText(b.dataset.copy);
+    });
+    const slug = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    $('#customOrigin').oninput = (e) => ($('#customLink').value = slug(e.target.value) ? `${location.origin}/tienda?origen=${slug(e.target.value)}` : '');
+    $('#copyCustom').onclick = () => $('#customLink').value && copyText($('#customLink').value);
     $('#shopCopy').onclick = async () => {
       try {
         await navigator.clipboard.writeText($('#shopPublicUrl').value);

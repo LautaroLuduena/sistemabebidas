@@ -11,6 +11,36 @@ const token = new URLSearchParams(location.search).get('c') || '';
 const qs = token ? `?c=${encodeURIComponent(token)}` : '';
 const CART_KEY = 'tienda_carrito_' + (token || 'publico');
 
+/**
+ * Origen de la visita (?origen=anuncio, ?origen=instagram...). Se recuerda 30 días para atribuir
+ * el pedido aunque el cliente vuelva más tarde sin el link.
+ */
+const origin = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('origen');
+  try {
+    if (fromUrl) {
+      localStorage.setItem('tienda_origen', JSON.stringify({ o: fromUrl, t: Date.now() }));
+      return fromUrl;
+    }
+    const saved = JSON.parse(localStorage.getItem('tienda_origen') || 'null');
+    if (saved && Date.now() - saved.t < 30 * 864e5) return saved.o;
+  } catch {
+    /* ignorar */
+  }
+  return fromUrl || (token ? 'link-personal' : 'directo');
+})();
+
+/** Una visita por sesión del navegador */
+function registerVisit() {
+  try {
+    if (sessionStorage.getItem('tienda_visita')) return;
+    sessionStorage.setItem('tienda_visita', '1');
+  } catch {
+    /* ignorar */
+  }
+  fetch('/api/shop/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origen: origin }) }).catch(() => {});
+}
+
 const state = { info: null, products: [], cat: '', q: '', cart: loadCart() };
 
 function loadCart() {
@@ -219,10 +249,10 @@ $('#orderForm').onsubmit = async (e) => {
     const r = await api('/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ c: token, ...f, items: lines.map((l) => ({ product_id: l.p.id, quantity: l.q })) }),
+      body: JSON.stringify({ c: token, origen: origin, ...f, items: lines.map((l) => ({ product_id: l.p.id, quantity: l.q })) }),
     });
     try {
-      localStorage.setItem('tienda_datos', JSON.stringify({ name: f.name, phone: f.phone, address: f.address }));
+      localStorage.setItem('tienda_datos', JSON.stringify({ name: f.name, phone: f.phone, address: f.address, city: f.city }));
     } catch {
       /* ignorar */
     }
@@ -342,6 +372,7 @@ function renderInfo(i) {
   const i = state.info;
   document.title = `${i.business_name} — Catálogo`;
   renderInfo(i);
+  registerVisit();
   if (i.message) notice(i.message, 'info');
   $('#cats').innerHTML =
     '<button class="active" data-cat="">Todo</button>' + i.categories.map((c) => `<button data-cat="${c.id}">${esc(c.name)}</button>`).join('');
@@ -358,6 +389,7 @@ function renderInfo(i) {
   form.name.value = pre.name || '';
   form.phone.value = pre.phone || saved.phone || '';
   form.address.value = pre.address || saved.address || '';
+  form.city.value = pre.city || saved.city || '';
   if (i.customer) {
     form.phone.required = false;
     $('#phoneReq').hidden = true;

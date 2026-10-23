@@ -264,6 +264,43 @@ function periodDetail(from, to) {
          GROUP BY COALESCE(i.product_id, i.description) ORDER BY total DESC LIMIT 100`
       )
       .all(...args),
+    // Tienda online: visitas y pedidos por canal de origen y por localidad
+    web_origins: (() => {
+      const visits = new Map(
+        db
+          .prepare(`SELECT origin, COUNT(*) n FROM shop_visits WHERE date(date) BETWEEN date(?) AND date(?) GROUP BY origin`)
+          .all(...args)
+          .map((r) => [r.origin, r.n])
+      );
+      const orders = db
+        .prepare(
+          `SELECT COALESCE(origin, 'directo') name, COUNT(*) orders, SUM(total) ordered,
+                  SUM(CASE WHEN status = 'vendido' THEN 1 ELSE 0 END) sold,
+                  SUM(CASE WHEN status = 'vendido' THEN total ELSE 0 END) sold_total,
+                  SUM(CASE WHEN status = 'anulado' THEN 1 ELSE 0 END) cancelled
+           FROM quotes WHERE source = 'web' AND date(date) BETWEEN date(?) AND date(?) GROUP BY COALESCE(origin, 'directo')`
+        )
+        .all(...args);
+      const names = new Set([...visits.keys(), ...orders.map((o) => o.name)]);
+      return [...names]
+        .map((name) => {
+          const o = orders.find((x) => x.name === name) || { orders: 0, ordered: 0, sold: 0, sold_total: 0, cancelled: 0 };
+          const v = visits.get(name) || 0;
+          return { ...o, name, visits: v, conversion: v ? Math.round((o.orders / v) * 1000) / 10 : null };
+        })
+        .sort((a, b) => b.sold_total - a.sold_total || b.orders - a.orders || b.visits - a.visits);
+    })(),
+    web_cities: db
+      .prepare(
+        `SELECT COALESCE(NULLIF(TRIM(q.contact_city), ''), NULLIF(TRIM(c.city), ''), 'Sin dato') name, COUNT(*) orders, SUM(q.total) ordered,
+                SUM(CASE WHEN q.status = 'vendido' THEN 1 ELSE 0 END) sold,
+                SUM(CASE WHEN q.status = 'vendido' THEN q.total ELSE 0 END) sold_total
+         FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id
+         WHERE q.source = 'web' AND date(q.date) BETWEEN date(?) AND date(?)
+         GROUP BY LOWER(COALESCE(NULLIF(TRIM(q.contact_city), ''), NULLIF(TRIM(c.city), ''), 'Sin dato'))
+         ORDER BY orders DESC, sold_total DESC`
+      )
+      .all(...args),
     expenses: db
       .prepare(
         `SELECT concept name, COUNT(*) n, SUM(-amount) total FROM cash_movements

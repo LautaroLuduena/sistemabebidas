@@ -52,7 +52,8 @@
       <form id="orderForm">
         <label>Nombre *<input name="name" required maxlength="80" autocomplete="name"></label>
         <label>Teléfono <span id="phoneReq">*</span><input name="phone" maxlength="40" inputmode="tel" autocomplete="tel"></label>
-        <label>Dirección de entrega<input name="address" maxlength="160" autocomplete="street-address" placeholder="Calle, número, localidad"></label>
+        <label>Localidad *<input name="city" required maxlength="60" autocomplete="address-level2" placeholder="Ej: Córdoba Capital, Villa Carlos Paz"></label>
+        <label>Dirección de entrega<input name="address" maxlength="160" autocomplete="street-address" placeholder="Calle y número"></label>
         <label>Notas<textarea name="notes" rows="2" maxlength="500" placeholder="Ej: horario de entrega, forma de pago"></textarea></label>
         <div class="error" id="orderError"></div>
         <button class="btn-wa" id="sendBtn" type="submit">Enviar pedido por WhatsApp</button>

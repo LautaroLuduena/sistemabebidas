@@ -49,6 +49,7 @@ function partyRouter({ table, partyType, label }) {
       phone: emptyToNull(body.phone),
       email: emptyToNull(body.email),
       address: emptyToNull(body.address),
+      city: emptyToNull(body.city),
       notes: emptyToNull(body.notes),
       active: body.active === undefined || body.active === true || body.active === 1 || body.active === '1' ? 1 : 0,
     };

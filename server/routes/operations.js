@@ -204,6 +204,10 @@ quotes.get('/', (req, res) => {
     where.push('q.source = ?');
     params.push(req.query.source);
   }
+  if (req.query.origin) {
+    where.push("COALESCE(q.origin, 'directo') = ?");
+    params.push(req.query.origin);
+  }
   const rows = db
     .prepare(
       `SELECT q.*, COALESCE(c.name, q.customer_name) customer_name, pl.name price_list_name,

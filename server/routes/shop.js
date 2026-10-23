@@ -108,7 +108,7 @@ router.get('/info', (req, res) => {
     show_steps: setting('shop_show_steps', '1') === '1',
     whatsapp: cfg.whatsapp,
     categories,
-    customer: customer ? { name: customer.name, phone: customer.phone, address: customer.address } : null,
+    customer: customer ? { name: customer.name, phone: customer.phone, address: customer.address, city: customer.city } : null,
   });
 });
 
@@ -169,6 +169,31 @@ function rateLimit(ip) {
   orderHits.set(ip, hits);
 }
 
+/** Etiqueta de origen del link (?origen=anuncio): solo letras, números y guiones */
+const cleanOrigin = (v) =>
+  String(v || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30) || 'directo';
+
+/** Registra una visita a la tienda (una por sesión del navegador). No guarda IP ni datos personales. */
+const visitHits = new Map();
+router.post('/visit', (req, res) => {
+  if (!shopConfig().enabled) return res.json({ ok: false });
+  // Freno simple contra recargas abusivas: hasta 30 visitas por hora por conexión
+  const now = Date.now();
+  const hits = (visitHits.get(req.ip) || []).filter((t) => now - t < 3600_000);
+  if (hits.length < 30) {
+    hits.push(now);
+    visitHits.set(req.ip, hits);
+    db.prepare('INSERT INTO shop_visits (origin) VALUES (?)').run(cleanOrigin(req.body.origen));
+  }
+  res.json({ ok: true });
+});
+
 const clean = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const money = (n) => '$ ' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -179,7 +204,10 @@ router.post('/orders', (req, res) => {
   const phone = clean(body.phone, 40);
   const address = clean(body.address, 160);
   const notes = clean(body.notes, 500);
+  const city = clean(body.city, 60) || (customer && customer.city) || '';
+  const origin = cleanOrigin(body.origen);
   if (!name) throw new HttpError(400, 'Escribí tu nombre');
+  if (!city) throw new HttpError(400, 'Escribí tu localidad');
   if (!customer && !phone) throw new HttpError(400, 'Escribí un teléfono de contacto');
   const items = Array.isArray(body.items) ? body.items.slice(0, 200) : [];
   const merged = new Map();
@@ -211,8 +239,8 @@ router.post('/orders', (req, res) => {
     const validDays = Math.max(1, Math.round(Number(getSetting('quote_valid_days')) || 7));
     const qid = db
       .prepare(
-        `INSERT INTO quotes (customer_id, customer_name, price_list_id, subtotal, discount, total, valid_until, notes, source, contact_phone, contact_address, status_changed_at)
-         VALUES (?,?,?,?,0,?,?,?, 'web', ?, ?, datetime('now','localtime'))`
+        `INSERT INTO quotes (customer_id, customer_name, price_list_id, subtotal, discount, total, valid_until, notes, source, contact_phone, contact_address, contact_city, origin, status_changed_at)
+         VALUES (?,?,?,?,0,?,?,?, 'web', ?, ?, ?, ?, datetime('now','localtime'))`
       )
       .run(
         customer ? customer.id : null,
@@ -223,8 +251,12 @@ router.post('/orders', (req, res) => {
         new Date(Date.now() + validDays * 864e5).toLocaleDateString('sv-SE'),
         [notes, customer && name !== customer.name ? `Pedido hecho por: ${name}` : ''].filter(Boolean).join(' · ') || null,
         phone || null,
-        address || null
+        address || null,
+        city,
+        origin
       ).lastInsertRowid;
+    // Si el cliente tiene ficha y no tenía localidad, se completa
+    if (customer && !customer.city) db.prepare('UPDATE customers SET city = ? WHERE id = ?').run(city, customer.id);
     const ins = db.prepare('INSERT INTO quote_items (quote_id, product_id, description, quantity, unit_price, subtotal) VALUES (?,?,?,?,?,?)');
     for (const l of lines) ins.run(qid, l.p.id, l.p.name, l.qty, l.unit, l.subtotal);
     return qid;
@@ -240,6 +272,7 @@ router.post('/orders', (req, res) => {
     `Nombre: ${name}`,
     ...(phone ? [`Teléfono: ${phone}`] : []),
     ...(address ? [`Dirección de entrega: ${address}`] : []),
+    `Localidad: ${city}`,
     ...(notes ? [`Notas: ${notes}`] : []),
   ].join('\n');
   const whatsapp_url = cfg.whatsapp ? `https://wa.me/${cfg.whatsapp}?text=${encodeURIComponent(text)}` : null;
@@ -258,6 +291,16 @@ admin.post('/customers/:id/shop-link', (req, res) => {
     db.prepare('UPDATE customers SET shop_token = ? WHERE id = ?').run(token, c.id);
   }
   res.json({ token });
+});
+
+/** Orígenes usados (para los filtros) */
+admin.get('/shop/origins', (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT origin FROM (SELECT COALESCE(origin, 'directo') origin FROM quotes WHERE source = 'web' UNION SELECT origin FROM shop_visits) ORDER BY origin`
+    )
+    .all();
+  res.json(rows.map((r) => r.origin));
 });
 
 admin.get('/shop/pending', (req, res) => {

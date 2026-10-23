@@ -300,7 +300,7 @@ test('tienda online: desactivada por defecto, catálogo sin costos, pedido web y
   const order = await pub('/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Juan', phone: '351 555', address: 'Calle 1', items: [{ product_id: beer.id, quantity: 3 }, { product_id: beer.id, quantity: 1 }], unit_price: 1 }),
+    body: JSON.stringify({ name: 'Juan', phone: '351 555', address: 'Calle 1', city: 'Córdoba', origen: 'anuncio', items: [{ product_id: beer.id, quantity: 3 }, { product_id: beer.id, quantity: 1 }], unit_price: 1 }),
   });
   assert.equal(order.status, 201);
   assert.match(order.data.whatsapp_url, /^https:\/\/wa\.me\/5493510000000\?text=/);
@@ -314,7 +314,7 @@ test('tienda online: desactivada por defecto, catálogo sin costos, pedido web y
   assert.ok((await call('GET', '/shop/pending')).n >= 1);
 
   // Validaciones
-  const bad = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'X', phone: '1', items: [] }) });
+  const bad = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'X', phone: '1', city: 'Córdoba', items: [] }) });
   assert.equal(bad.status, 400);
 
   // Link personal: precios de la lista del cliente, sin pedir teléfono
@@ -324,7 +324,7 @@ test('tienda online: desactivada por defecto, catálogo sin costos, pedido web y
   assert.equal(personal.data.customer.name, 'Kiosco Web');
   const pBeer = (await pub(`/products?c=${token}`)).data.find((p) => p.id === beer.id);
   assert.equal(pBeer.price, 1300); // precio fijo mayorista
-  const o2 = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ c: token, items: [{ product_id: beer.id, quantity: 2 }] }) });
+  const o2 = await pub('/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ c: token, city: 'Villa Carlos Paz', items: [{ product_id: beer.id, quantity: 2 }] }) });
   assert.equal(o2.status, 201);
   assert.equal((await call('GET', `/quotes/${o2.data.id}`)).customer_id, cid);
   assert.equal((await pub('/info?c=token-falso')).status, 404);
@@ -362,20 +362,20 @@ test('pedidos web: no se puede pedir más que el stock, la mercadería queda res
   assert.equal((await find()).max, 10);
 
   // Más de lo que hay: rechazado
-  const tooMuch = await pub('/orders', { name: 'Ana', phone: '1', items: [{ product_id: prod.id, quantity: 11 }] });
+  const tooMuch = await pub('/orders', { name: 'Ana', phone: '1', city: 'Córdoba', items: [{ product_id: prod.id, quantity: 11 }] });
   assert.equal(tooMuch.status, 409);
   assert.match(tooMuch.data.error, /solo hay 10 disponibles/);
 
   // Pedido de 7: quedan 3 disponibles para el resto
-  const o1 = await pub('/orders', { name: 'Ana', phone: '1', items: [{ product_id: prod.id, quantity: 7 }] });
+  const o1 = await pub('/orders', { name: 'Ana', phone: '1', city: 'Córdoba', items: [{ product_id: prod.id, quantity: 7 }] });
   assert.equal(o1.status, 201);
   assert.equal((await find()).max, 3);
   const catalog = (await call('GET', '/products?q=Reserva Test'))[0];
   assert.equal(catalog.stock, 10); // el stock real no cambia
   assert.equal(catalog.reserved, 7);
   assert.equal(catalog.available, 3);
-  assert.equal((await pub('/orders', { name: 'Beto', phone: '2', items: [{ product_id: prod.id, quantity: 4 }] })).status, 409);
-  const o2 = await pub('/orders', { name: 'Beto', phone: '2', items: [{ product_id: prod.id, quantity: 3 }] });
+  assert.equal((await pub('/orders', { name: 'Beto', phone: '2', city: 'Córdoba', items: [{ product_id: prod.id, quantity: 4 }] })).status, 409);
+  const o2 = await pub('/orders', { name: 'Beto', phone: '2', city: 'Córdoba', items: [{ product_id: prod.id, quantity: 3 }] });
   assert.equal(o2.status, 201);
   assert.equal((await find()).available, false);
 
@@ -424,11 +424,40 @@ test('pedido mínimo por lista de precios en la tienda', async () => {
   assert.equal((await pub('/info')).data.min_order, 1000);
   // Cliente mayorista: usa el de su lista
   assert.equal((await pub(`/info?c=${token}`)).data.min_order, 50000);
-  const small = await pub('/orders', { c: token, items: [{ product_id: prod.id, quantity: 2 }] });
+  const small = await pub('/orders', { c: token, city: 'Río Cuarto', items: [{ product_id: prod.id, quantity: 2 }] });
   assert.equal(small.status, 400);
   assert.match(small.data.error, /mínimo/);
-  const big = await pub('/orders', { c: token, items: [{ product_id: prod.id, quantity: 50 }] });
+  const big = await pub('/orders', { c: token, city: 'Río Cuarto', items: [{ product_id: prod.id, quantity: 50 }] });
   assert.equal(big.status, 201);
   await call('POST', `/quotes/${big.data.id}/cancel`);
   await call('PUT', '/settings', { shop_enabled: '0', shop_min_order: '' });
+});
+
+test('tienda: origen (anuncios, instagram) y localidad de los pedidos', async () => {
+  await call('PUT', '/settings', { shop_enabled: '1', shop_private: '0', shop_min_order: '' });
+  const pub = (path, body) =>
+    fetch(base + '/shop' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+  const prod = await call('POST', '/products', { name: 'Origen Test', cost: 100, stock: 50 });
+  await pub('/visit', { origen: 'Instagram' });
+  await pub('/visit', { origen: 'instagram' });
+  await pub('/visit', { origen: 'Anuncio IG' });
+  const noCity = await pub('/orders', { name: 'Sin Loc', phone: '1', items: [{ product_id: prod.id, quantity: 1 }] });
+  assert.equal(noCity.status, 400);
+  assert.match(noCity.data.error, /localidad/);
+  const o = await pub('/orders', { name: 'Lucía', phone: '2', city: 'Villa María', origen: 'Instagram', items: [{ product_id: prod.id, quantity: 2 }] });
+  assert.equal(o.status, 201);
+  assert.ok(decodeURIComponent(o.data.whatsapp_url).includes('Localidad: Villa María'));
+  const q = await call('GET', `/quotes/${o.data.id}`);
+  assert.equal(q.origin, 'instagram');
+  assert.equal(q.contact_city, 'Villa María');
+  assert.ok((await call('GET', '/shop/origins')).includes('anuncio-ig'));
+  assert.ok((await call('GET', '/quotes?source=web&origin=instagram')).some((x) => x.id === o.data.id));
+
+  const d = new Date().toLocaleDateString('sv-SE');
+  const p = await call('GET', `/reports/period?from=${d.slice(0, 8)}01&to=${d}`);
+  const ig = p.web_origins.find((r) => r.name === 'instagram');
+  assert.ok(ig.visits >= 2 && ig.orders >= 1);
+  assert.ok(p.web_cities.some((c) => c.name === 'Villa María'));
+  await call('POST', `/quotes/${o.data.id}/cancel`);
+  await call('PUT', '/settings', { shop_enabled: '0' });
 });

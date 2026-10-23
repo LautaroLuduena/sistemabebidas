@@ -237,7 +237,17 @@ addColumn('quotes', 'contact_phone', 'TEXT');
 addColumn('quotes', 'contact_address', 'TEXT');
 addColumn('customers', 'shop_token', 'TEXT');
 addColumn('quotes', 'status_changed_at', 'TEXT');
-addColumn('price_lists', 'min_order', 'REAL NOT NULL DEFAULT 0'); // pedido mínimo en la tienda online para esa lista
+addColumn('price_lists', 'min_order', 'REAL NOT NULL DEFAULT 0');
+// Seguimiento de la tienda online: de qué canal vienen (origen) y de qué localidad son los clientes
+addColumn('quotes', 'origin', 'TEXT');
+addColumn('quotes', 'contact_city', 'TEXT');
+addColumn('customers', 'city', 'TEXT');
+addColumn('suppliers', 'city', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS shop_visits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  origin TEXT NOT NULL DEFAULT 'directo'
+)`); // pedido mínimo en la tienda online para esa lista
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_shop_token ON customers(shop_token)');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;

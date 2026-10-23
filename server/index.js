@@ -13,6 +13,7 @@ const auth = require('./auth');
 const backup = require('./routes/backup');
 const history = require('./routes/history');
 const { publicShop, shopAdmin } = require('./routes/shop');
+const whatsapp = require('./routes/whatsapp');
 
 function createApp() {
   const app = express();
@@ -38,6 +39,7 @@ function createApp() {
   api.use(backup);
   api.use(history);
   api.use(shopAdmin);
+  api.use('/wa-templates', whatsapp);
   api.use(files); // primero, para que /products/export.xlsx no choque con /products/:id
   api.use(catalog);
   api.use('/customers', customers);

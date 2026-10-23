@@ -243,6 +243,18 @@ addColumn('quotes', 'origin', 'TEXT');
 addColumn('quotes', 'contact_city', 'TEXT');
 addColumn('customers', 'city', 'TEXT');
 addColumn('suppliers', 'city', 'TEXT');
+// Mensajes armados para responder anuncios por WhatsApp (precios y stock se calculan al momento)
+db.exec(`CREATE TABLE IF NOT EXISTS wa_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  product_ids TEXT NOT NULL DEFAULT '[]',
+  list_ids TEXT NOT NULL DEFAULT '[]',
+  intro TEXT,
+  outro TEXT,
+  origin TEXT,
+  show_stock INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS shop_visits (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date TEXT NOT NULL DEFAULT (datetime('now','localtime')),

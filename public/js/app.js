@@ -1040,6 +1040,177 @@ views.ventas = {
   },
 };
 
+// ---------- Mensajes para WhatsApp (respuestas a anuncios) ----------
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const t = document.createElement('textarea');
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    document.execCommand('copy');
+    t.remove();
+  }
+  toast('Mensaje copiado: pegalo en WhatsApp', 'ok');
+}
+
+async function waTemplateForm(tpl, onSaved) {
+  const lists = await cache.lists();
+  const t = tpl || { product_ids: [], list_ids: [defaultList(lists)], show_stock: 1 };
+  const chosen = [];
+  for (const id of t.product_ids) {
+    try {
+      chosen.push(await api('/products/' + id));
+    } catch {
+      /* producto borrado */
+    }
+  }
+  modal({
+    title: tpl ? `Editar mensaje — ${tpl.name}` : 'Nuevo mensaje para un anuncio',
+    wide: true,
+    body: `<div class="grid cols-2" style="align-items:start">
+      <div class="form-grid" style="grid-template-columns:minmax(0,1fr)">
+        ${field('Nombre (para reconocerlo)', `<input name="name" value="${esc(t.name || '')}" placeholder="Ej: Anuncio Fernet / Anuncio Whisky">`)}
+        <div class="field"><label>Productos del anuncio</label><div><input id="waSearch" placeholder="🔍 Buscar y agregar producto" autocomplete="off" data-noenter="1"></div>
+          <div id="waChosen" class="toolbar" style="margin:6px 0 0"></div></div>
+        <div class="field"><label>Precios a mostrar</label><div class="toolbar" style="margin:0">
+          ${lists.map((l) => `<label class="check"><input type="checkbox" data-list="${l.id}" ${t.list_ids.includes(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('')}</div></div>
+        <label class="check"><input type="checkbox" name="show_stock" ${t.show_stock ? 'checked' : ''}> Mostrar disponibilidad (Disponible / Últimas unidades / Sin stock)</label>
+        ${field('Texto inicial (opcional)', `<textarea name="intro" rows="2" placeholder="Ej: Te paso la info del producto que viste en el anuncio:">${esc(t.intro || '')}</textarea>`)}
+        ${field('Texto final (opcional)', `<textarea name="outro" rows="2" placeholder="Ej: Cualquier consulta escribinos por acá 🙌">${esc(t.outro || '')}</textarea>`)}
+        ${field('Etiqueta de seguimiento del link', `<input name="origin" value="${esc(t.origin || '')}" placeholder="Se arma sola con el nombre (ej: anuncio-fernet)">`)}
+      </div>
+      <div><label class="muted" style="font-size:12px;font-weight:600">Vista previa (precios actuales)</label>
+        <pre id="waPreview" class="wa-bubble"></pre></div></div>`,
+    actions: [
+      { label: 'Cancelar' },
+      {
+        label: 'Guardar',
+        cls: 'primary',
+        onClick: async (el) => {
+          const body = collect(el);
+          if (!body.product_ids.length && !body.intro) throw new Error('Agregá al menos un producto o un texto');
+          if (tpl) await api('/wa-templates/' + tpl.id, { method: 'PUT', body });
+          else await api('/wa-templates', { method: 'POST', body });
+          toast('Mensaje guardado', 'ok');
+          onSaved && onSaved();
+        },
+      },
+    ],
+    onOpen(el) {
+      const renderChosen = () => {
+        $('#waChosen', el).innerHTML = chosen.length
+          ? chosen.map((p, i) => `<span class="badge info" style="font-size:12px;padding:4px 8px">${esc(p.name)} <a href="#" data-rm="${i}" style="margin-left:4px">✕</a></span>`).join('')
+          : '<span class="muted" style="font-size:12px">Sin productos (podés mandar solo el texto y el link)</span>';
+        preview();
+      };
+      $('#waChosen', el).onclick = (e) => {
+        if (e.target.dataset.rm === undefined) return;
+        e.preventDefault();
+        chosen.splice(Number(e.target.dataset.rm), 1);
+        renderChosen();
+      };
+      productPicker($('#waSearch', el), {
+        listId: () => '',
+        onPick: (p) => {
+          if (!chosen.some((x) => x.id === p.id)) chosen.push(p);
+          renderChosen();
+        },
+      });
+      const preview = debounce(
+        safe(async () => {
+          const r = await api('/wa-templates/preview', { method: 'POST', body: collect(el) });
+          $('#waPreview', el).textContent = r.text;
+        }),
+        250
+      );
+      el.addEventListener('input', preview);
+      el.addEventListener('change', preview);
+      renderChosen();
+    },
+  });
+  function collect(el) {
+    const f = formData(el);
+    return {
+      name: f.name,
+      intro: f.intro,
+      outro: f.outro,
+      origin: f.origin,
+      show_stock: f.show_stock,
+      product_ids: chosen.map((p) => p.id),
+      list_ids: $$('[data-list]', el).filter((i) => i.checked).map((i) => Number(i.dataset.list)),
+    };
+  }
+}
+
+views.mensajes = {
+  title: 'Mensajes WhatsApp',
+  async render(view) {
+    const [rows, s] = await Promise.all([api('/wa-templates'), api('/settings')]);
+    view.innerHTML = `
+      <div class="card" style="background:var(--primary-soft)">💬 Armá un mensaje por cada anuncio con el producto, sus precios, los mínimos de compra, el link a la tienda y tu canal de WhatsApp.
+        <b>Los precios y el stock se actualizan solos</b> cada vez que lo copiás. Cuando alguien te escribe por un anuncio, tocá <b>📋 Copiar</b> y pegalo en el chat, o <b>💬 Enviar</b> para abrir WhatsApp con el mensaje listo.
+        <div class="muted" style="font-size:12px;margin-top:6px">Más adelante, el bot automático va a usar estos mismos mensajes para responder solo según el anuncio.</div></div>
+      <div class="card"><div class="form-grid" id="waCfg">
+        ${field('Saludo inicial de todos los mensajes', `<input name="wa_greeting" value="${esc(s.wa_greeting || '')}" placeholder="¡Hola! 👋 Gracias por escribir a *${esc(s.business_name || '')}*.">`)}
+        ${field('Link de tu canal de WhatsApp', `<input name="wa_channel_url" value="${esc(s.wa_channel_url || '')}" placeholder="https://whatsapp.com/channel/...">`)}
+      </div><div class="toolbar" style="margin:10px 0 0"><button class="btn" id="waCfgSave">Guardar</button>
+        ${s.shop_enabled !== '1' ? '<span class="muted" style="font-size:12px">⚠️ La tienda online está desactivada: los mensajes no van a incluir el link hasta que la actives.</span>' : ''}</div></div>
+      <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="waNew">➕ Nuevo mensaje</button></div>
+      <div class="grid cols-2" id="waList">${rows.length ? '' : '<div class="card empty">Todavía no hay mensajes. Creá uno por cada anuncio que tengas activo.</div>'}</div>`;
+    const reload = () => views.mensajes.render(view);
+    $('#waList').insertAdjacentHTML(
+      'beforeend',
+      rows
+        .map(
+          (t) => `<div class="card" style="margin:0"><div class="toolbar" style="margin-bottom:8px"><h2 style="margin:0">${esc(t.name)}</h2><span class="spacer"></span>
+            <span class="badge info">📣 ${esc(t.origin || 'whatsapp')}</span></div>
+            <pre class="wa-bubble">${esc(t.text)}</pre>
+            <div class="toolbar" style="margin:10px 0 0"><button class="btn primary" data-copy="${t.id}">📋 Copiar</button>
+              <button class="btn ok" data-send="${t.id}">💬 Enviar</button><span class="spacer"></span>
+              <button class="btn sm" data-edit="${t.id}">✏️</button><button class="btn sm danger" data-del="${t.id}">✕</button></div></div>`
+        )
+        .join('')
+    );
+    $('#waCfgSave').onclick = safe(async () => {
+      await api('/settings', { method: 'PUT', body: formData($('#waCfg')) });
+      toast('Guardado', 'ok');
+      reload();
+    });
+    $('#waNew').onclick = () => waTemplateForm(null, reload);
+    $('#waList').onclick = safe(async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const fresh = await api('/wa-templates'); // precios y stock del momento
+      const t = fresh.find((x) => String(x.id) === String(b.dataset.copy || b.dataset.send || b.dataset.edit || b.dataset.del));
+      if (!t) return;
+      if (b.dataset.copy) copyToClipboard(t.text);
+      if (b.dataset.send)
+        modal({
+          title: `Enviar "${t.name}"`,
+          body: `${field('Teléfono del cliente (opcional)', '<input name="phone" inputmode="tel" placeholder="Ej: 351 1234567. Vacío = elegís el chat en WhatsApp">')}`,
+          actions: [
+            { label: 'Cancelar' },
+            {
+              label: 'Abrir WhatsApp',
+              cls: 'ok',
+              onClick: (el) => {
+                const phone = waNumber(formData(el).phone);
+                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(t.text)}`, '_blank');
+              },
+            },
+          ],
+        });
+      if (b.dataset.edit) waTemplateForm(t, reload);
+      if (b.dataset.del && (await confirmDialog(`¿Eliminar el mensaje "${t.name}"?`, 'Eliminar'))) {
+        await api('/wa-templates/' + t.id, { method: 'DELETE' });
+        reload();
+      }
+    });
+  },
+};
+
 // ---------- Remitos X ----------
 /** Emite el remito de una venta y ofrece descargarlo */
 async function remitoForm(saleId, onDone) {

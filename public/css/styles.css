@@ -151,6 +151,9 @@ table.table { width: 100%; border-collapse: collapse; }
 .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
 tfoot td { border-top: 2px solid var(--border); }
 
+/* Vista previa de mensaje de WhatsApp */
+.wa-bubble { background: #e7fbd8; border-radius: 10px 10px 10px 2px; padding: 10px 12px; font-family: inherit; font-size: 13px; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; max-height: 420px; overflow: auto; border: 1px solid #cdeab5; }
+
 /* Login */
 .auth-screen { position: fixed; inset: 0; background: var(--sidebar); display: flex; align-items: center; justify-content: center; z-index: 90; padding: 16px; }
 .auth-card { background: var(--panel); border-radius: 14px; padding: 28px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.35); }

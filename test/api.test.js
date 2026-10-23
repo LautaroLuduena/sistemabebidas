@@ -461,3 +461,29 @@ test('tienda: origen (anuncios, instagram) y localidad de los pedidos', async ()
   await call('POST', `/quotes/${o.data.id}/cancel`);
   await call('PUT', '/settings', { shop_enabled: '0' });
 });
+
+test('mensajes de WhatsApp por anuncio con precios, stock, mínimos y links actualizados', async () => {
+  await call('PUT', '/settings', { shop_enabled: '1', wa_channel_url: 'https://whatsapp.com/channel/ABC', shop_min_order: '' });
+  const lists = await call('GET', '/price-lists');
+  const minor = lists.find((l) => l.name === 'Minorista');
+  const mayor = await call('POST', '/price-lists', { name: 'Mayorista WA', markup: 20, min_order: 1500000 });
+  const prod = await call('POST', '/products', { name: 'Whisky WA', cost: 10000, stock: 5, units_per_pack: 6 });
+  const t = await call('POST', '/wa-templates', { name: 'Anuncio Whisky', product_ids: [prod.id], list_ids: [minor.id, mayor.id], intro: 'Te paso la info:' });
+  let msg = (await call('GET', '/wa-templates')).find((x) => x.id === t.id);
+  assert.equal(msg.origin, 'anuncio-whisky');
+  assert.match(msg.text, /\*Whisky WA\*/);
+  assert.match(msg.text, /Minorista: \$ 15\.000 c\/u · Bulto x6: \$ 90\.000/);
+  assert.match(msg.text, /Mayorista WA: \$ 12\.000 c\/u/);
+  assert.match(msg.text, /✅ Disponible/);
+  assert.match(msg.text, /Mayorista WA \*\$ 1\.500\.000\*/);
+  assert.match(msg.text, /\/tienda\?origen=anuncio-whisky/);
+  assert.match(msg.text, /whatsapp\.com\/channel\/ABC/);
+  // Cambia el precio: el mensaje se actualiza solo
+  await call('PUT', `/products/${prod.id}`, { name: 'Whisky WA', cost: 20000, units_per_pack: 6 });
+  msg = (await call('GET', '/wa-templates')).find((x) => x.id === t.id);
+  assert.match(msg.text, /Minorista: \$ 30\.000 c\/u/);
+  const prev = await call('POST', '/wa-templates/preview', { product_ids: [prod.id], list_ids: [minor.id], show_stock: false });
+  assert.ok(!/Disponible/.test(prev.text));
+  await call('DELETE', `/wa-templates/${t.id}`);
+  await call('PUT', '/settings', { shop_enabled: '0' });
+});

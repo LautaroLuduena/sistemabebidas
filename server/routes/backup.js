@@ -30,6 +30,7 @@ const DATA_TABLES = [
   'quotes',
   'quote_items',
   'remitos',
+  'wa_templates',
 ];
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif)$/i;
 

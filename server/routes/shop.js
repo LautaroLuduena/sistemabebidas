@@ -88,6 +88,25 @@ router.get('/info', (req, res) => {
     show_prices: Boolean(list),
     min_order: minOrderFor(cfg, list),
     message: cfg.message,
+    // Información del negocio para la cabecera de la tienda (se edita en Configuración → Tienda online)
+    tagline: setting('shop_tagline', 'Ventas por mayor y menor'),
+    hours: setting('shop_hours', ''),
+    maps_url:
+      setting('shop_maps_url', '') ||
+      (getSetting('business_address') ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getSetting('business_address'))}` : ''),
+    shipping: setting('shop_shipping', ''),
+    payments: [
+      setting('shop_pay_cash', '1') === '1' && '💵 Efectivo',
+      setting('shop_pay_transfer', '1') === '1' && '🏦 Transferencia',
+      setting('shop_pay_account', '0') === '1' && '📒 Cuenta corriente',
+      ...String(setting('shop_pay_other', ''))
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    ].filter(Boolean),
+    payments_note: setting('shop_pay_note', ''),
+    show_steps: setting('shop_show_steps', '1') === '1',
+    whatsapp: cfg.whatsapp,
     categories,
     customer: customer ? { name: customer.name, phone: customer.phone, address: customer.address } : null,
   });

@@ -2525,6 +2525,20 @@ views.config = {
           <p class="muted full" style="margin:-4px 0 0;font-size:12px">Cada lista de precios puede tener su propio pedido mínimo (en <a href="#/listas">Listas de precios</a>). El general se usa solo para las listas que no tienen uno.</p>
           <label class="check full"><input type="checkbox" name="shop_hide_out_of_stock" ${s.shop_hide_out_of_stock === '1' ? 'checked' : ''}> Ocultar productos sin stock</label>
           <label class="check full"><input type="checkbox" name="shop_private" ${s.shop_private === '1' ? 'checked' : ''}> Solo para clientes con link personal (el link general no muestra nada)</label>
+          <h3 class="full" style="font-size:14px;margin:10px 0 0">Información que ve el cliente arriba de la tienda</h3>
+          ${field('Frase debajo del nombre', `<input name="shop_tagline" value="${esc(s.shop_tagline ?? 'Ventas por mayor y menor')}" placeholder="Ej: Ventas por mayor y menor">`)}
+          ${field('Horario de atención', `<input name="shop_hours" value="${esc(s.shop_hours || '')}" placeholder="Ej: Lun a Sáb de 8 a 20 hs">`)}
+          ${field('Envíos (cada renglón es un dato; el primero se muestra destacado en el celular)', `<textarea name="shop_shipping" rows="3" placeholder="Entregas martes, jueves y sábados&#10;Retiro en el local sin cargo&#10;Pedidos hasta las 18 hs salen al día siguiente">${esc(s.shop_shipping || '')}</textarea>`, 'full')}
+          <div class="field full"><label>Formas de pago</label>
+            <div class="toolbar" style="margin:0">
+              <label class="check"><input type="checkbox" name="shop_pay_cash" ${s.shop_pay_cash !== '0' ? 'checked' : ''}> 💵 Efectivo</label>
+              <label class="check"><input type="checkbox" name="shop_pay_transfer" ${s.shop_pay_transfer !== '0' ? 'checked' : ''}> 🏦 Transferencia</label>
+              <label class="check"><input type="checkbox" name="shop_pay_account" ${s.shop_pay_account === '1' ? 'checked' : ''}> 📒 Cuenta corriente</label>
+            </div></div>
+          ${field('Otras formas de pago (separadas por coma)', `<input name="shop_pay_other" value="${esc(s.shop_pay_other || '')}" placeholder="Ej: Mercado Pago, Tarjeta de débito">`)}
+          ${field('Aclaración sobre pagos', `<input name="shop_pay_note" value="${esc(s.shop_pay_note || '')}" placeholder="Ej: Cuenta corriente solo para clientes habilitados">`)}
+          ${field('Link de Google Maps (opcional)', `<input name="shop_maps_url" value="${esc(s.shop_maps_url || '')}" placeholder="Si lo dejás vacío se arma con la dirección del negocio">`, 'full')}
+          <label class="check full"><input type="checkbox" name="shop_show_steps" ${s.shop_show_steps !== '0' ? 'checked' : ''}> Mostrar "Cómo comprar" en 3 pasos (en el celular)</label>
           ${field('Mensaje para los clientes (opcional)', `<textarea name="shop_message" rows="2" placeholder="Ej: Entregas de lunes a sábado. Pedidos antes de las 18 hs salen al día siguiente.">${esc(s.shop_message || '')}</textarea>`, 'full')}
         </div>
         <div class="toolbar" style="margin-top:12px"><button class="btn primary" id="shopSave">Guardar tienda</button>
@@ -2601,7 +2615,8 @@ views.config = {
     });
     $('#shopSave').onclick = safe(async () => {
       const f = formData($('#shopForm'));
-      for (const k of ['shop_enabled', 'shop_hide_out_of_stock', 'shop_private']) f[k] = f[k] ? '1' : '0';
+      for (const k of ['shop_enabled', 'shop_hide_out_of_stock', 'shop_private', 'shop_pay_cash', 'shop_pay_transfer', 'shop_pay_account', 'shop_show_steps'])
+        f[k] = f[k] ? '1' : '0';
       f.shop_whatsapp = String(f.shop_whatsapp || '').replace(/\D/g, '');
       f.shop_min_order = String(num(f.shop_min_order) || '');
       await api('/settings', { method: 'PUT', body: f });

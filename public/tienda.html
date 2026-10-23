@@ -9,9 +9,26 @@
   <link rel="stylesheet" href="/css/tienda.css">
 </head>
 <body>
-  <header class="shop-header">
-    <div class="shop-brand"><img src="/api/logo" alt="" id="shopLogo" onerror="this.remove()"><div><b id="shopName"></b><div class="muted" id="shopHello"></div></div></div>
+  <header class="hero">
+    <div class="hero-in">
+      <div class="hero-logo"><img src="/api/logo" alt="" onerror="this.parentElement.remove()"></div>
+      <div>
+        <h1 id="shopName"></h1>
+        <div class="hero-tag" id="shopTag"></div>
+        <div class="hero-pills" id="heroPills"></div>
+      </div>
+    </div>
   </header>
+  <section class="shop-info">
+    <div class="info-cards" id="infoCards"></div>
+    <div class="info-chips" id="infoChips"></div>
+    <details class="steps" id="steps" open hidden>
+      <summary>ℹ️ Cómo comprar</summary>
+      <div class="step"><span>1️⃣</span><div>Elegí los productos y armá tu pedido.</div></div>
+      <div class="step"><span>2️⃣</span><div>Envialo por WhatsApp: la mercadería queda reservada.</div></div>
+      <div class="step"><span>3️⃣</span><div>Te confirmamos el día de entrega y el total.</div></div>
+    </details>
+  </section>
   <main class="shop-main">
     <div id="shopNotice"></div>
     <div class="shop-filters">

@@ -22,16 +22,57 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-se
 .small { font-size: 12px; }
 .empty { padding: 40px 16px; text-align: center; color: var(--muted); grid-column: 1 / -1; }
 
-.shop-header { background: var(--panel); border-bottom: 3px solid var(--accent); padding: 10px 16px; position: sticky; top: 0; z-index: 5; }
-.shop-brand { display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto; }
-.shop-brand img { height: 52px; max-width: 120px; object-fit: contain; }
-.shop-brand b { font-size: 18px; color: var(--primary); }
+/* Cabecera */
+.hero { background: linear-gradient(135deg, #0b2a66 0%, #123c8c 60%, #1d4fae 100%); color: #fff; padding: 16px 16px 18px; position: relative; overflow: hidden; }
+.hero::after { content: ""; position: absolute; right: -70px; top: -70px; width: 230px; height: 230px; border-radius: 50%; background: rgba(245, 124, 0, .18); }
+.hero-in { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 14px; position: relative; z-index: 1; }
+.hero-logo { background: #fff; border-radius: 14px; padding: 6px 10px; display: flex; flex-shrink: 0; }
+.hero-logo img { height: 50px; max-width: 130px; object-fit: contain; }
+.hero h1 { margin: 0; font-size: 20px; }
+.hero-tag { opacity: .85; font-size: 14px; margin-top: 2px; }
+.hero-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hero-pills span { background: rgba(255, 255, 255, .14); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+
+/* Información del negocio: chips en celular, tarjetas en computadora */
+.shop-info { max-width: 1200px; margin: 0 auto; padding: 12px 16px 0; position: relative; z-index: 2; }
+.info-cards { display: none; }
+.info-chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
+.info-chips::-webkit-scrollbar { display: none; }
+.chip-info { flex-shrink: 0; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; font-size: 13px; text-decoration: none; color: var(--text); box-shadow: 0 2px 8px rgba(16, 24, 40, .05); max-width: 260px; }
+.chip-info b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip-info small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip-info.min { background: #fff3e6; border-color: #ffd6a8; }
+.steps { margin-top: 8px; background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 10px 14px; font-size: 14px; }
+.steps summary { font-weight: 700; color: var(--primary); cursor: pointer; }
+.step { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+.step:first-of-type { border-top: none; margin-top: 4px; }
+.card-info { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: 0 4px 14px rgba(16, 24, 40, .06); }
+.card-info .t { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--primary); }
+.card-info .ic { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: #e8eef9; font-size: 16px; flex-shrink: 0; }
+.card-info p { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; white-space: pre-line; }
+.card-info p b { color: var(--text); }
+.card-info a { color: var(--primary); font-weight: 600; font-size: 13px; text-decoration: none; display: inline-block; margin-top: 6px; }
+.card-info .pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.card-info .pill { background: var(--bg); border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+.card-info.min { background: #fff3e6; border-color: #ffd6a8; }
+.card-info.min .t { color: #b45309; }
+.card-info.min .ic { background: #ffe2c2; }
+.card-info .big { font-size: 20px; font-weight: 800; color: var(--text); margin-top: 4px; }
+
+@media (min-width: 760px) {
+  .hero { padding: 20px 16px 58px; }
+  .hero-logo img { height: 60px; }
+  .hero h1 { font-size: 23px; }
+  .shop-info { margin-top: -42px; padding-top: 0; }
+  .info-chips, .steps { display: none; }
+  .info-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+}
 
 .shop-main { max-width: 1200px; margin: 0 auto; padding: 12px 16px; }
 .notice { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; white-space: pre-line; }
 .notice.info { background: #e6ecf8; color: var(--primary); }
 .notice.error { background: var(--danger-soft); color: var(--danger); }
-.shop-filters { position: sticky; top: 75px; z-index: 4; background: var(--bg); padding: 6px 0 8px; }
+.shop-filters { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: 6px 0 8px; }
 .shop-filters input { width: 100%; font: inherit; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding-top: 8px; scrollbar-width: none; }
 .chips button { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; color: var(--text); }

@@ -263,6 +263,72 @@ $('#orderForm').onsubmit = async (e) => {
   }
 };
 
+// ---------- Cabecera e información del negocio ----------
+/** Teléfono para mostrar: 5493515918555 -> 351 591-8555 */
+const prettyPhone = (wa) => {
+  const d = String(wa || '').replace(/^549/, '');
+  return d.length === 10 ? `${d.slice(0, 3)} ${d.slice(3, 6)}-${d.slice(6)}` : d;
+};
+
+function renderInfo(i) {
+  $('#shopName').textContent = i.business_name;
+  $('#shopTag').textContent = i.tagline || '';
+  $('#heroPills').innerHTML = [
+    i.customer ? `👋 Hola, ${esc(i.customer.name)}` : '',
+    i.hours ? `🕒 ${esc(i.hours)}` : '',
+  ]
+    .filter(Boolean)
+    .map((t) => `<span>${t}</span>`)
+    .join('');
+
+  const waLink = i.whatsapp ? `https://wa.me/${i.whatsapp}` : '';
+  const minOrder = i.show_prices && i.min_order ? money(i.min_order).replace(/,00$/, '') : '';
+  const shipLines = String(i.shipping || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const payNames = i.payments.map((p) => p.replace(/^\S+\s/, ''));
+
+  // Computadora: tarjetas
+  const cards = [];
+  if (i.business_address)
+    cards.push(`<div class="card-info"><div class="t"><span class="ic">📍</span>Dónde estamos</div>
+      <p><b>${esc(i.business_address)}</b></p>${i.maps_url ? `<a href="${esc(i.maps_url)}" target="_blank" rel="noopener">Ver en el mapa →</a>` : ''}</div>`);
+  if (shipLines.length)
+    cards.push(`<div class="card-info"><div class="t"><span class="ic">🚚</span>Envíos</div><p>${esc(shipLines.join('\n'))}</p></div>`);
+  if (i.payments.length)
+    cards.push(`<div class="card-info"><div class="t"><span class="ic">💳</span>Formas de pago</div>
+      <div class="pills">${i.payments.map((p) => `<span class="pill">${esc(p)}</span>`).join('')}</div>
+      ${i.payments_note ? `<p style="font-size:12px">${esc(i.payments_note)}</p>` : ''}</div>`);
+  if (minOrder || waLink)
+    cards.push(`<div class="card-info ${minOrder ? 'min' : ''}"><div class="t"><span class="ic">${minOrder ? '🛒' : '💬'}</span>${minOrder ? 'Pedido mínimo' : 'Consultas'}</div>
+      ${minOrder ? `<div class="big">${minOrder}</div>` : ''}
+      ${waLink ? `<p style="margin-top:${minOrder ? 0 : 6}px">Consultas: <a href="${waLink}" target="_blank" rel="noopener" style="margin:0">💬 ${esc(prettyPhone(i.whatsapp))}</a></p>` : ''}</div>`);
+  $('#infoCards').innerHTML = cards.join('');
+
+  // Celular: chips deslizables + "Cómo comprar"
+  const chip = (icon, title, sub, href, cls = '') =>
+    `<${href ? `a href="${esc(href)}" target="_blank" rel="noopener"` : 'div'} class="chip-info ${cls}">${icon}<div><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div></${href ? 'a' : 'div'}>`;
+  $('#infoChips').innerHTML = [
+    minOrder ? chip('🛒', `Mínimo ${minOrder}`, 'por pedido', '', 'min') : '',
+    shipLines.length ? chip('🚚', shipLines[0], shipLines[1] || '') : '',
+    i.payments.length ? chip('💳', payNames.slice(0, 2).join(' · '), [payNames.slice(2).join(' · '), i.payments_note].filter(Boolean).join(' · ')) : '',
+    i.business_address ? chip('📍', i.business_address, i.maps_url ? 'Ver mapa' : '', i.maps_url) : '',
+    waLink ? chip('💬', prettyPhone(i.whatsapp), 'Consultas por WhatsApp', waLink) : '',
+  ].join('');
+  $('#steps').hidden = !i.show_steps;
+  // Si el cliente ya lo cerró una vez, en las próximas visitas aparece cerrado
+  try {
+    if (localStorage.getItem('tienda_pasos') === 'cerrado') $('#steps').open = false;
+  } catch {
+    /* ignorar */
+  }
+  $('#steps').addEventListener('toggle', () => {
+    try {
+      localStorage.setItem('tienda_pasos', $('#steps').open ? 'abierto' : 'cerrado');
+    } catch {
+      /* ignorar */
+    }
+  });
+}
+
 // ---------- Inicio ----------
 (async () => {
   try {
@@ -275,10 +341,8 @@ $('#orderForm').onsubmit = async (e) => {
   }
   const i = state.info;
   document.title = `${i.business_name} — Catálogo`;
-  $('#shopName').textContent = i.business_name;
-  $('#shopHello').textContent = i.customer ? `Hola, ${i.customer.name} 👋` : [i.business_address, i.business_phone].filter(Boolean).join(' · ');
+  renderInfo(i);
   if (i.message) notice(i.message, 'info');
-  if (i.show_prices && i.min_order) notice(`Pedido mínimo: ${money(i.min_order)}`);
   $('#cats').innerHTML =
     '<button class="active" data-cat="">Todo</button>' + i.categories.map((c) => `<button data-cat="${c.id}">${esc(c.name)}</button>`).join('');
 
